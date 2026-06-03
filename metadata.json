@@ -1,0 +1,6 @@
+{
+  "name": "Barbería El Bastrioui",
+  "description": "Sitio web oficial de la Barbería El Bastrioui - Cortes modernos, afeitado a navaja y perfilado en Carrer de Lumière, 6.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
