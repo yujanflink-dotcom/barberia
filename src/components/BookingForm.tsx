@@ -52,6 +52,7 @@ export default function BookingForm({ selectedServiceIds, onToggleService, onBoo
   const [bookingDate, setBookingDate] = useState('');
   const [bookingTime, setBookingTime] = useState('');
   const [notes, setNotes] = useState('');
+  const [rgpdConsent, setRgpdConsent] = useState(false);
 
   // UI Error & Receipt States
   const [errorMessage, setErrorMessage] = useState('');
@@ -126,6 +127,7 @@ export default function BookingForm({ selectedServiceIds, onToggleService, onBoo
   const [adminSearch, setAdminSearch] = useState('');
   const [adminError, setAdminError] = useState('');
   const [adminSuccess, setAdminSuccess] = useState('');
+  const [adminDateFilter, setAdminDateFilter] = useState<'all' | 'today' | 'tomorrow' | 'upcoming'>('all');
 
   useEffect(() => {
     if (forceAdminView && localStorage.getItem('elbastrioui_admin_auth') === 'true') {
@@ -196,6 +198,91 @@ export default function BookingForm({ selectedServiceIds, onToggleService, onBoo
     setManSelectedServices((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
+  };
+
+  const handleQuickBlock = async (dayTarget: 'today' | 'tomorrow' | 'manual', type: 'full' | 'morning_only') => {
+    setAdminError('');
+    setAdminSuccess('');
+
+    let targetDateStr = '';
+    const today = new Date();
+    
+    if (dayTarget === 'today') {
+      targetDateStr = formatDateString(today);
+    } else if (dayTarget === 'tomorrow') {
+      const tomorrow = new Date(Date.now() + 86450000);
+      targetDateStr = formatDateString(tomorrow);
+    } else {
+      if (!manDate) {
+        setAdminError('Por favor, selecciona primero un día en el campo "Día del Bloqueo" abajo.');
+        return;
+      }
+      targetDateStr = manDate;
+    }
+
+    const defaultReason = type === 'full' 
+      ? 'Estamos Cerrados por Imprevisto 🚫' 
+      : 'Abrimos Más Tarde hoy ⏳';
+
+    const reasonPrompt = window.prompt(
+      type === 'full'
+        ? `¿Confirmas cerrar este día completo (${targetDateStr})? Inserta un motivo si quieres:`
+        : `¿Confirmas cerrar solo por la mañana para abrir tarde (${targetDateStr})? Inserta un motivo si quieres:`,
+      defaultReason
+    );
+
+    if (reasonPrompt === null) {
+      // User cancelled
+      return;
+    }
+
+    const finalMotive = reasonPrompt.trim() || defaultReason;
+
+    if (type === 'full') {
+      // Create a 12 hour block starting at 09:00 (covers 09:00 to 21:00)
+      const fullDayBlock: Booking = {
+        id: 'block-full-' + Math.random().toString(36).substring(2, 6),
+        name: `🚫 ${finalMotive}`,
+        phone: 'ORGANIZACIÓN',
+        date: targetDateStr,
+        time: '09:00',
+        services: [],
+        notes: 'Cierre total de jornada por un imprevisto administrativo.',
+        totalPrice: 0,
+        totalDuration: 720, // 12 hours
+        createdAt: Date.now()
+      };
+
+      try {
+        await createNewBooking(fullDayBlock);
+        onBookingCreated();
+        setAdminSuccess(`¡Día ${targetDateStr} marcado como CERRADO COMPLETO correctamente!`);
+      } catch (err: any) {
+        setAdminError(err?.message || 'Error al guardar el cierre total del día.');
+      }
+    } else {
+      // 5 hours block (09:00 - 14:00)
+      const morningBlock: Booking = {
+        id: 'block-morning-' + Math.random().toString(36).substring(2, 6),
+        name: `⏳ ${finalMotive}`,
+        phone: 'ORGANIZACIÓN',
+        date: targetDateStr,
+        time: '09:00',
+        services: [],
+        notes: 'Cargado vía panel para cerrar la mañana. Abrimos a las 16:00 h.',
+        totalPrice: 0,
+        totalDuration: 300, // 5 hours block (09:00 - 14:00)
+        createdAt: Date.now()
+      };
+
+      try {
+        await createNewBooking(morningBlock);
+        onBookingCreated();
+        setAdminSuccess(`¡Mañana del ${targetDateStr} cerrada correctamente! Abriremos a partir de las 16:00 h.`);
+      } catch (err: any) {
+        setAdminError(err?.message || 'Error al guardar el cierre de la mañana.');
+      }
+    }
   };
 
   // Calculate current date constraint (min values)
@@ -364,6 +451,10 @@ export default function BookingForm({ selectedServiceIds, onToggleService, onBoo
       setErrorMessage('Por favor introduce un número de móvil válido (mínimo 9 dígitos).');
       return;
     }
+    if (!rgpdConsent) {
+      setErrorMessage('Debes aceptar la política de privacidad y el tratamiento de datos para poder reservar de forma segura.');
+      return;
+    }
 
     // Save Booking
     const newBooking: Booking = {
@@ -413,6 +504,7 @@ export default function BookingForm({ selectedServiceIds, onToggleService, onBoo
     setBookingDate('');
     setBookingTime('');
     setNotes('');
+    setRgpdConsent(false);
     // clear selected services in App
     selectedServiceIds.forEach(id => onToggleService(id));
   };
@@ -497,181 +589,528 @@ export default function BookingForm({ selectedServiceIds, onToggleService, onBoo
           </div>
 
           <div className="p-6 sm:p-8">
-            {adminActiveTab === 'list' && (
-              <div className="space-y-6">
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 border-b border-neutral-850 pb-4">
-                  <div className="relative w-full sm:max-w-xs">
-                    <input
-                      type="text"
-                      value={adminSearch}
-                      onChange={(e) => setAdminSearch(e.target.value)}
-                      placeholder="Buscar cliente..."
-                      className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-2.5 pl-9 text-xs font-mono text-white placeholder-neutral-500 focus:outline-none focus:border-amber-500"
-                    />
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-500" />
+            {adminActiveTab === 'list' && (() => {
+              const todayStr = formatDateString(new Date());
+              const tomorrowStr = formatDateString(new Date(Date.now() + 86450000));
+              
+              const filteredList = allBookings
+                .filter((bk) => {
+                  const term = adminSearch.toLowerCase();
+                  const matchesSearch = 
+                    bk.name.toLowerCase().includes(term) ||
+                    bk.phone.toLowerCase().includes(term) ||
+                    bk.id.toLowerCase().includes(term);
+                    
+                  if (!matchesSearch) return false;
+                  
+                  if (adminDateFilter === 'today') {
+                    return bk.date === todayStr;
+                  } else if (adminDateFilter === 'tomorrow') {
+                    return bk.date === tomorrowStr;
+                  } else if (adminDateFilter === 'upcoming') {
+                    return bk.date >= todayStr;
+                  }
+                  return true;
+                })
+                .sort((a, b) => {
+                  if (a.date !== b.date) {
+                    return a.date.localeCompare(b.date);
+                  }
+                  return a.time.localeCompare(b.time);
+                });
+
+              const countTotal = allBookings.length;
+              const countToday = allBookings.filter(b => b.date === todayStr).length;
+              const countTomorrow = allBookings.filter(b => b.date === tomorrowStr).length;
+              const countUpcoming = allBookings.filter(b => b.date >= todayStr).length;
+
+              return (
+                <div className="space-y-6">
+                  {/* Top Bar: Search and Backup */}
+                  <div className="flex flex-col md:flex-row items-center justify-between gap-4 border-b border-neutral-850 pb-4">
+                    <div className="relative w-full md:max-w-xs">
+                      <input
+                        type="text"
+                        value={adminSearch}
+                        onChange={(e) => setAdminSearch(e.target.value)}
+                        placeholder="Buscar cliente, móvil o ID..."
+                        className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-2.5 pl-9 text-xs font-mono text-white placeholder-neutral-500 focus:outline-none focus:border-amber-500"
+                      />
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-500" />
+                    </div>
+                    
+                    <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto justify-end">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          try {
+                            const dataStr = JSON.stringify(allBookings, null, 2);
+                            const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+                            const exportFileDefaultName = `backup-citas-bastrioui-${new Date().toISOString().split('T')[0]}.json`;
+                            
+                            const linkElement = document.createElement('a');
+                            linkElement.setAttribute('href', dataUri);
+                            linkElement.setAttribute('download', exportFileDefaultName);
+                            linkElement.click();
+                            setAdminSuccess('¡Copia de seguridad descargada correctamente! Tienes todas las citas a salvo.');
+                          } catch (e) {
+                            setAdminError('Error al exportar la copia de seguridad.');
+                          }
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-neutral-900 hover:bg-neutral-850 border border-neutral-800 hover:border-neutral-700 text-neutral-350 hover:text-white rounded text-xs transition-all font-mono font-bold cursor-pointer"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        Copia de Seguridad (JSON)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onBookingCreated()}
+                        className="p-1.5 bg-neutral-900 border border-neutral-800 hover:border-neutral-700 text-amber-500 rounded hover:bg-neutral-850 cursor-pointer transition-all"
+                        title="Sincronizar ahora"
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex flex-wrap items-center gap-3">
+
+                  {/* Filter Tabs by Date with Badges */}
+                  <div className="flex flex-wrap gap-2 p-1 bg-neutral-900/60 rounded-xl border border-neutral-850 max-w-full">
                     <button
                       type="button"
-                      onClick={() => {
-                        try {
-                          const dataStr = JSON.stringify(allBookings, null, 2);
-                          const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-                          const exportFileDefaultName = `backup-citas-bastrioui-${new Date().toISOString().split('T')[0]}.json`;
-                          
-                          const linkElement = document.createElement('a');
-                          linkElement.setAttribute('href', dataUri);
-                          linkElement.setAttribute('download', exportFileDefaultName);
-                          linkElement.click();
-                          setAdminSuccess('¡Copia de seguridad descargada correctamente! Tienes todas las citas a salvo.');
-                        } catch (e) {
-                          setAdminError('Error al exportar la copia de seguridad.');
-                        }
-                      }}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-neutral-900 hover:bg-neutral-850 border border-neutral-800 hover:border-neutral-700 text-neutral-350 hover:text-white rounded text-xs transition-all font-mono font-bold cursor-pointer"
+                      onClick={() => setAdminDateFilter('all')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold font-mono transition-all flex items-center gap-1.5 cursor-pointer ${
+                        adminDateFilter === 'all'
+                          ? 'bg-amber-500 text-neutral-950 shadow'
+                          : 'text-neutral-400 hover:text-white hover:bg-neutral-800'
+                      }`}
                     >
-                      <Download className="w-3.5 h-3.5" />
-                      Copia de Seguridad (JSON)
+                      <span>Todas</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-sans ${adminDateFilter === 'all' ? 'bg-neutral-950/20 text-neutral-950' : 'bg-neutral-800 text-neutral-400'}`}>{countTotal}</span>
                     </button>
-                    <span className="text-[10px] text-neutral-500 font-mono">
-                      Sincronizado en vivo
-                    </span>
-                  </div>
-                </div>
+                    
+                    <button
+                      type="button"
+                      onClick={() => setAdminDateFilter('today')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold font-mono transition-all flex items-center gap-1.5 cursor-pointer ${
+                        adminDateFilter === 'today'
+                          ? 'bg-amber-500 text-neutral-950 shadow'
+                          : 'text-neutral-400 hover:text-white hover:bg-neutral-800'
+                      }`}
+                    >
+                      <span className="flex items-center gap-1">🕒 Hoy</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-sans ${adminDateFilter === 'today' ? 'bg-neutral-950/20 text-neutral-950' : 'bg-neutral-800 text-neutral-400'}`}>{countToday}</span>
+                    </button>
 
-                {allBookings.length === 0 ? (
-                  <div className="text-center py-12">
-                    <p className="text-neutral-500 italic text-sm">No hay citas registradas en el sistema todavía.</p>
+                    <button
+                      type="button"
+                      onClick={() => setAdminDateFilter('tomorrow')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold font-mono transition-all flex items-center gap-1.5 cursor-pointer ${
+                        adminDateFilter === 'tomorrow'
+                          ? 'bg-amber-500 text-neutral-950 shadow'
+                          : 'text-neutral-400 hover:text-white hover:bg-neutral-800'
+                      }`}
+                    >
+                      <span>Mañana</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-sans ${adminDateFilter === 'tomorrow' ? 'bg-neutral-950/20 text-neutral-950' : 'bg-neutral-800 text-neutral-400'}`}>{countTomorrow}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setAdminDateFilter('upcoming')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold font-mono transition-all flex items-center gap-1.5 cursor-pointer ${
+                        adminDateFilter === 'upcoming'
+                          ? 'bg-amber-500 text-neutral-950 shadow'
+                          : 'text-neutral-400 hover:text-white hover:bg-neutral-800'
+                      }`}
+                    >
+                      <span>Futuras</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-sans ${adminDateFilter === 'upcoming' ? 'bg-neutral-950/20 text-neutral-950' : 'bg-neutral-800 text-neutral-400'}`}>{countUpcoming}</span>
+                    </button>
                   </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs sm:text-sm font-sans">
-                      <thead>
-                        <tr className="border-b border-neutral-850 text-neutral-500 text-[10px] uppercase font-mono tracking-widest">
-                          <th className="py-3 px-2">ID</th>
-                          <th className="py-3 px-2">Cliente / Móvil</th>
-                          <th className="py-3 px-2">Servicios</th>
-                          <th className="py-3 px-2 text-center">Hora</th>
-                          <th className="py-3 px-2">Fecha</th>
-                          <th className="py-3 px-2 text-right">Monto</th>
-                          <th className="py-3 px-2 text-center">Acciones</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-neutral-900 font-mono text-[11px] sm:text-xs">
-                        {allBookings
-                          .filter((bk) => {
-                            const term = adminSearch.toLowerCase();
-                            return (
-                              bk.name.toLowerCase().includes(term) ||
-                              bk.phone.toLowerCase().includes(term) ||
-                              bk.id.toLowerCase().includes(term)
-                            );
-                          })
-                          .map((bk) => {
-                            const isBlock = bk.name.startsWith('🚫');
-                            return (
-                              <tr
-                                key={bk.id}
-                                className={`hover:bg-neutral-900/40 transition-colors ${
-                                  isBlock ? 'bg-red-950/5 text-red-300/90' : 'text-neutral-300'
-                                }`}
-                              >
-                                <td className="py-3 px-2 font-bold font-mono">
+
+                  {filteredList.length === 0 ? (
+                    <div className="text-center py-12 bg-neutral-900/10 border border-dashed border-neutral-800 rounded-xl">
+                      <p className="text-neutral-500 italic text-sm">No se encontraron citas con el filtro seleccionado.</p>
+                    </div>
+                  ) : (
+                    <>
+                      {/* MOBILE GRID VIEW (Highly visual cards, perfect for Redouan on mobile) */}
+                      <div className="block sm:hidden space-y-4">
+                        {filteredList.map((bk) => {
+                          const isBlock = bk.name.startsWith('🚫');
+                          const isToday = bk.date === todayStr;
+                          const isTomorrow = bk.date === tomorrowStr;
+
+                          return (
+                            <div
+                              key={bk.id}
+                              className={`p-4 rounded-xl border relative flex flex-col space-y-3 shadow-md ${
+                                isBlock
+                                  ? 'bg-red-950/15 border-red-900/50 text-red-100'
+                                  : 'bg-neutral-900/90 border-neutral-800 text-neutral-200'
+                              }`}
+                            >
+                              {/* Header Card: date & time badge */}
+                              <div className="flex items-center justify-between border-b border-neutral-800 pb-2.5">
+                                <span className="font-mono text-[10px] text-neutral-500 font-bold uppercase">
                                   #{bk.id.substring(0, 5).toUpperCase()}
-                                </td>
-                                <td className="py-3 px-2">
-                                  <div className="font-semibold text-white text-xs font-sans">
-                                    {bk.name}
-                                  </div>
-                                  <div className="text-[10px] text-neutral-400 mt-0.5">
-                                    {bk.phone}
-                                  </div>
-                                </td>
-                                <td className="py-3 px-2 max-w-[150px] truncate-2-lines">
+                                </span>
+                                <div className="flex items-center space-x-1.5">
+                                  {isToday && (
+                                    <span className="bg-amber-500 text-neutral-950 text-[9px] font-mono font-bold px-1.5 py-0.5 rounded animate-pulse">
+                                      HOY
+                                    </span>
+                                  )}
+                                  {isTomorrow && (
+                                    <span className="bg-blue-600 text-white text-[9px] font-mono font-bold px-1.5 py-0.5 rounded">
+                                      MAÑA
+                                    </span>
+                                  )}
+                                  <span className="bg-amber-500/10 text-amber-500 text-xs font-mono font-bold px-2 py-0.5 rounded border border-amber-500/20">
+                                    {bk.date}
+                                  </span>
+                                  <span className="bg-white text-neutral-950 text-xs font-mono font-black px-2 py-0.5 rounded">
+                                    {bk.time}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Customer and phone info */}
+                              <div className="space-y-1">
+                                <div className="font-serif font-bold text-white text-base">
+                                  {bk.name}
+                                </div>
+                                <div className="text-xs text-neutral-400 font-mono flex items-center justify-between gap-2">
+                                  <span>📞 {bk.phone}</span>
+                                  {!isBlock && (
+                                    <div className="flex gap-2">
+                                      <a
+                                        href={`tel:${bk.phone}`}
+                                        className="p-1 px-2 bg-neutral-800 hover:bg-neutral-750 text-neutral-300 rounded hover:text-white flex items-center gap-1 text-[10px] border border-neutral-700"
+                                      >
+                                        Llamar
+                                      </a>
+                                      <a
+                                        href={getWhatsAppBookingLink({
+                                          name: bk.name,
+                                          phone: bk.phone,
+                                          date: bk.date,
+                                          time: bk.time,
+                                          servicesText: getServicesNames(bk.services),
+                                          price: bk.totalPrice,
+                                        })}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="p-1 px-2 bg-emerald-600/20 border border-emerald-500/35 hover:bg-emerald-600/30 text-emerald-400 font-semibold rounded flex items-center gap-1 text-[10px]"
+                                      >
+                                        Chat
+                                      </a>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Services info & amount */}
+                              <div className="bg-neutral-950/60 p-2.5 rounded-lg border border-neutral-850/60 space-y-1 text-xs">
+                                <span className="text-neutral-500 text-[10px] uppercase font-mono block">Servicios Elegidos</span>
+                                <div className="text-white font-medium">
                                   {isBlock ? (
-                                    <span className="text-amber-500 font-semibold uppercase text-[10px]">Bloqueo Administrativo</span>
+                                    <span className="text-amber-500 font-mono font-bold uppercase text-[10px]">🚫 Horario Bloqueado</span>
                                   ) : (
                                     getServicesNames(bk.services)
                                   )}
-                                </td>
-                                <td className="py-3 px-2 text-center text-white font-bold">
-                                  {bk.time}
-                                </td>
-                                <td className="py-3 px-2 font-bold">
-                                  <span className="text-amber-500">{bk.date}</span>
-                                </td>
-                                <td className="py-3 px-2 text-right text-emerald-400 font-bold text-sm">
-                                  {bk.totalPrice}€
-                                </td>
-                                <td className="py-3 px-2 text-center">
-                                  <button
-                                    type="button"
-                                    onClick={async () => {
-                                      if (window.confirm(`¿Seguro que deseas ELIMINAR/CANCELAR esta reserva de ${bk.name}? Se liberará el horario de forma inmediata.`)) {
-                                        await deleteBookingById(bk.id);
-                                        onBookingCreated();
-                                        setAdminSuccess(`¡La reserva de ${bk.name} ha sido eliminada con éxito! Horas liberadas.`);
-                                      }
-                                    }}
-                                    className="p-1.5 text-neutral-500 hover:text-red-400 hover:bg-neutral-900 rounded cursor-pointer transition-colors"
-                                    title="Eliminar o cancelar cita"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
+                                </div>
+                                {bk.notes && (
+                                  <div className="text-[10px] text-neutral-400 pt-1.5 mt-1 border-t border-neutral-900 italic text-neutral-350">
+                                    Nota: "{bk.notes}"
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Footer control buttons */}
+                              <div className="flex items-center justify-between pt-1 font-mono text-xs">
+                                <div className="flex items-center space-x-1">
+                                  <span className="text-[10px] text-neutral-500 uppercase">Caja:</span>
+                                  <span className="font-serif font-black text-sm text-emerald-400">{bk.totalPrice}€</span>
+                                </div>
+                                
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    if (window.confirm(`¿Seguro que deseas ELIMINAR/CANCELAR esta reserva de ${bk.name}? Se liberará el horario de forma inmediata.`)) {
+                                      await deleteBookingById(bk.id);
+                                      onBookingCreated();
+                                      setAdminSuccess(`¡La reserva de ${bk.name} ha sido eliminada con éxito! Horas liberadas.`);
+                                    }
+                                  }}
+                                  className="py-1.5 px-3 bg-red-600/10 hover:bg-red-650/20 text-red-400 border border-red-500/20 rounded flex items-center gap-1 font-bold text-[10px]"
+                                  title="Liberar hora"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <span>Liberar Hora</span>
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* DESKTOP TABLE VIEW (Shown on tablet and computer) */}
+                      <div className="hidden sm:block overflow-x-auto rounded-xl border border-neutral-850">
+                        <table className="w-full text-left text-xs sm:text-sm font-sans">
+                          <thead>
+                            <tr className="border-b border-neutral-850 bg-neutral-900/20 text-neutral-500 text-[10px] uppercase font-mono tracking-widest">
+                              <th className="py-3.5 px-3">ID</th>
+                              <th className="py-3.5 px-3">Cliente / Móvil</th>
+                              <th className="py-3.5 px-3">Servicios</th>
+                              <th className="py-3.5 px-3 text-center">Hora</th>
+                              <th className="py-3.5 px-3">Fecha</th>
+                              <th className="py-3.5 px-3 text-right">Monto</th>
+                              <th className="py-3.5 px-3 text-center">Acciones</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-neutral-900 font-mono text-[11px] sm:text-xs">
+                            {filteredList.map((bk) => {
+                              const isBlock = bk.name.startsWith('🚫');
+                              const isToday = bk.date === todayStr;
+
+                              return (
+                                <tr
+                                  key={bk.id}
+                                  className={`hover:bg-neutral-900/40 transition-colors ${
+                                    isBlock ? 'bg-red-950/5 text-red-300/90' : 'text-neutral-300'
+                                  }`}
+                                >
+                                  <td className="py-3.5 px-3 font-bold font-mono text-neutral-500">
+                                    #{bk.id.substring(0, 5).toUpperCase()}
+                                  </td>
+                                  <td className="py-3.5 px-3">
+                                    <div className="font-semibold text-white text-xs font-sans flex items-center gap-1.5">
+                                      {bk.name}
+                                      {isToday && (
+                                        <span className="bg-amber-500 text-neutral-950 text-[8px] font-mono font-extrabold px-1.5 py-0.2 rounded animate-pulse">HOY</span>
+                                      )}
+                                    </div>
+                                    <div className="text-[10px] text-neutral-400 mt-0.5 flex items-center gap-2">
+                                      <span>{bk.phone}</span>
+                                      {!isBlock && (
+                                        <>
+                                          •
+                                          <a href={`tel:${bk.phone}`} className="text-neutral-500 hover:text-white underline">Llamar</a>
+                                          •
+                                          <a
+                                            href={getWhatsAppBookingLink({
+                                              name: bk.name,
+                                              phone: bk.phone,
+                                              date: bk.date,
+                                              time: bk.time,
+                                              servicesText: getServicesNames(bk.services),
+                                              price: bk.totalPrice,
+                                            })}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-emerald-500 hover:text-emerald-400"
+                                          >WhatsApp</a>
+                                        </>
+                                      )}
+                                    </div>
+                                    {bk.notes && (
+                                      <div className="text-[10px] text-neutral-550 mt-1 italic max-w-[200px] truncate leading-tight" title={bk.notes}>
+                                        "{bk.notes}"
+                                      </div>
+                                    )}
+                                  </td>
+                                  <td className="py-3.5 px-3 max-w-[150px] truncate-2-lines font-sans">
+                                    {isBlock ? (
+                                      <span className="text-amber-500 font-semibold uppercase text-[10px]">Bloqueo Administrativo</span>
+                                    ) : (
+                                      getServicesNames(bk.services)
+                                    )}
+                                  </td>
+                                  <td className="py-3.5 px-3 text-center text-white font-bold">
+                                    {bk.time}
+                                  </td>
+                                  <td className="py-3.5 px-3 font-bold">
+                                    <span className="text-amber-500">{bk.date}</span>
+                                  </td>
+                                  <td className="py-3.5 px-3 text-right text-emerald-400 font-bold text-sm">
+                                    {bk.totalPrice}€
+                                  </td>
+                                  <td className="py-3.5 px-3 text-center">
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        if (window.confirm(`¿Seguro que deseas ELIMINAR/CANCELAR esta reserva de ${bk.name}? Se liberará el horario de forma inmediata.`)) {
+                                          await deleteBookingById(bk.id);
+                                          onBookingCreated();
+                                          setAdminSuccess(`¡La reserva de ${bk.name} ha sido eliminada con éxito! Horas liberadas.`);
+                                        }
+                                      }}
+                                      className="p-1.5 text-neutral-500 hover:text-red-400 hover:bg-neutral-900 rounded cursor-pointer transition-colors"
+                                      title="Eliminar o cancelar cita"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })()}
 
             {adminActiveTab === 'block' && (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  setAdminError('');
-                  setAdminSuccess('');
-
-                  if (!manDate) {
-                    setAdminError('Por favor introduce una fecha para realizar el bloqueo.');
-                    return;
-                  }
-                  if (!manTime) {
-                    setAdminError('Por favor selecciona la hora de inicio.');
-                    return;
-                  }
-
-                  const newBlock: Booking = {
-                    id: 'block-' + Math.random().toString(36).substring(2, 5),
-                    name: `🚫 Bloqueo: ${manNotes.trim() || 'Hora no disponible'}`,
-                    phone: 'ORGANIZACIÓN',
-                    date: manDate,
-                    time: manTime,
-                    services: [],
-                    notes: 'Bloqueado por el administrador.',
-                    totalPrice: 0,
-                    totalDuration: blockDuration,
-                    createdAt: Date.now()
-                  };
-
-                  createNewBooking(newBlock).then(() => {
-                    onBookingCreated();
-                    setAdminSuccess('¡Horario bloqueado correctamente! Ya no saldrá disponible para los clientes.');
-                    setManNotes('');
-                    setManTime('');
-                  });
-                }}
-                className="space-y-6 max-w-xl mx-auto"
-              >
-                <div className="bg-neutral-900/50 p-4 rounded-xl border border-neutral-850/60 mb-6">
-                  <p className="text-xs text-neutral-400 leading-relaxed">
-                    🛡️ <strong>Uso del Bloqueador:</strong> Ideal si Redouan se va a ausentar por un almuerzo, recados o descanso. Elige el día, la hora de inicio y cuánto tiempo durará. Los clientes que agenden verán ese tramo horario en <strong>rojo (ocupado)</strong> de forma automática.
+              <div className="space-y-8 max-w-xl mx-auto">
+                {/* Panel de Incidencias y Bloqueos de Emergencia (Quick Closures) */}
+                <div className="bg-gradient-to-br from-red-950/20 via-neutral-900 to-neutral-950 border border-red-900/40 rounded-xl p-5 space-y-4 shadow-xl">
+                  <div className="flex items-center gap-2 pb-1 border-b border-neutral-800">
+                    <span className="text-lg">⚠️</span>
+                    <div>
+                      <h4 className="text-xs uppercase font-mono font-bold tracking-wider text-red-300">
+                        Cierre rápido por imprevistos (Redouan)
+                      </h4>
+                      <p className="text-[10px] text-neutral-500 font-mono">Panel del Jefe • Estado Especial</p>
+                    </div>
+                  </div>
+                  
+                  <p className="text-xs text-neutral-350 leading-relaxed">
+                    Si ocurre cualquier imprevisto personal u familiar, pulsa abajo para cerrar el día entero o demorar la apertura. La agenda de cara al cliente se desactivará de inmediato.
                   </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                    {/* Cierres Completos */}
+                    <div className="bg-neutral-900/40 border border-neutral-850 p-3.5 rounded-lg flex flex-col justify-between space-y-3">
+                      <div>
+                        <div className="font-sans font-bold text-xs text-red-400 flex items-center gap-1.5">
+                          🚫 CERRAR DÍA ENTERO
+                        </div>
+                        <p className="text-[10px] text-neutral-500 leading-tight mt-1">
+                          Bloquea todas las horas disponibles de la fecha de corrido.
+                        </p>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleQuickBlock('today', 'full')}
+                          className="w-full text-center py-2 bg-red-650 hover:bg-red-650/80 font-bold font-mono text-[10px] text-white rounded-lg cursor-pointer transition-all active:scale-[0.98] border border-red-500/10 shadow shadow-red-950/50"
+                        >
+                          Cerrar TODO Hoy 🚫
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleQuickBlock('tomorrow', 'full')}
+                          className="w-full text-center py-2 bg-neutral-950 hover:bg-neutral-900 border border-neutral-800 font-bold font-mono text-[10px] text-neutral-300 hover:text-white rounded-lg cursor-pointer transition-all active:scale-[0.98]"
+                        >
+                          Cerrar TODO Mañana
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Aperturas Tardías */}
+                    <div className="bg-neutral-900/40 border border-neutral-850 p-3.5 rounded-lg flex flex-col justify-between space-y-3">
+                      <div>
+                        <div className="font-sans font-bold text-xs text-amber-500 flex items-center gap-1.5">
+                          ⏳ RETRASAR APERTURA
+                        </div>
+                        <p className="text-[10px] text-neutral-500 leading-tight mt-1">
+                          Cierra el turno de mañana (9:00 a 14:00). Abre por la tarde (16:00 h).
+                        </p>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleQuickBlock('today', 'morning_only')}
+                          className="w-full text-center py-2 bg-amber-600 hover:bg-amber-500/80 font-bold font-mono text-[10px] text-white rounded-lg cursor-pointer transition-all active:scale-[0.98] border border-amber-500/10 shadow shadow-amber-950/50"
+                        >
+                          Abrir de Tarde Hoy ⏳
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleQuickBlock('tomorrow', 'morning_only')}
+                          className="w-full text-center py-2 bg-neutral-950 hover:bg-neutral-900 border border-neutral-800 font-bold font-mono text-[10px] text-neutral-300 hover:text-white rounded-lg cursor-pointer transition-all active:scale-[0.98]"
+                        >
+                          Abrir de Tarde Mañana
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {manDate && (
+                    <div className="flex flex-col sm:flex-row items-center sm:items-center justify-between gap-2.5 text-[11px] bg-neutral-950 text-neutral-400 p-3 rounded-lg border border-neutral-850">
+                      <span>Día seleccionado abajo: <strong className="text-amber-500 font-mono">{manDate}</strong></span>
+                      <div className="flex flex-wrap gap-2 w-full sm:w-auto justify-end">
+                        <button
+                          type="button"
+                          onClick={() => handleQuickBlock('manual', 'full')}
+                          className="px-2.5 py-1.5 bg-red-650/20 hover:bg-red-650/30 border border-red-500/20 rounded font-mono text-[10px] font-bold text-white cursor-pointer transition-colors"
+                        >
+                          🚫 Cerrar este día completo
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleQuickBlock('manual', 'morning_only')}
+                          className="px-2.5 py-1.5 bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/20 rounded font-mono text-[10px] font-bold text-white cursor-pointer transition-colors"
+                        >
+                          ⏳ Abrir tarde este día
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
+
+                <div className="relative flex py-2 items-center">
+                  <div className="flex-grow border-t border-neutral-850"></div>
+                  <span className="flex-shrink mx-4 text-[9px] uppercase font-mono tracking-widest text-neutral-600">O BLOQUEO MANUAL DE HORAS</span>
+                  <div className="flex-grow border-t border-neutral-850"></div>
+                </div>
+
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    setAdminError('');
+                    setAdminSuccess('');
+
+                    if (!manDate) {
+                      setAdminError('Por favor introduce una fecha para realizar el bloqueo.');
+                      return;
+                    }
+                    if (!manTime) {
+                      setAdminError('Por favor selecciona la hora de inicio.');
+                      return;
+                    }
+
+                    const newBlock: Booking = {
+                      id: 'block-' + Math.random().toString(36).substring(2, 5),
+                      name: `🚫 Bloqueo: ${manNotes.trim() || 'Hora no disponible'}`,
+                      phone: 'ORGANIZACIÓN',
+                      date: manDate,
+                      time: manTime,
+                      services: [],
+                      notes: 'Bloqueado por el administrador.',
+                      totalPrice: 0,
+                      totalDuration: blockDuration,
+                      createdAt: Date.now()
+                    };
+
+                    createNewBooking(newBlock).then(() => {
+                      onBookingCreated();
+                      setAdminSuccess('¡Horario bloqueado correctamente! Ya no saldrá disponible para los clientes.');
+                      setManNotes('');
+                      setManTime('');
+                    });
+                  }}
+                  className="space-y-6"
+                >
+                  <div className="bg-neutral-900/50 p-4 rounded-xl border border-neutral-850/60 font-mono">
+                    <p className="text-[11px] text-neutral-400 leading-relaxed">
+                      🛡️ <strong>Uso del Bloqueador Personalizado:</strong> Ideal si te vas a ausentar un tramo corto (almuerzo, recado o descanso de café). Selecciona la fecha, la hora exacta de inicio y el tiempo.
+                    </p>
+                  </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
@@ -737,7 +1176,8 @@ export default function BookingForm({ selectedServiceIds, onToggleService, onBoo
                   Confirmar Bloqueo de Horario
                 </button>
               </form>
-            )}
+            </div>
+          )}
 
             {adminActiveTab === 'manual' && (
               <form
@@ -1413,6 +1853,27 @@ export default function BookingForm({ selectedServiceIds, onToggleService, onBoo
                         />
                         <FileText className="absolute left-3.5 top-4 w-4 h-4 text-neutral-500" />
                       </div>
+                    </div>
+
+                    {/* Legal / GDPR Compliance and Consent */}
+                    <div className="mt-5 p-3.5 rounded-lg border border-neutral-850 bg-neutral-900/30 text-xs text-neutral-400 space-y-3">
+                      <div className="flex items-start gap-2.5">
+                        <input
+                          id="rgpd-check"
+                          type="checkbox"
+                          checked={rgpdConsent}
+                          onChange={(e) => setRgpdConsent(e.target.checked)}
+                          required
+                          className="mt-1 accent-amber-500 scale-110 cursor-pointer h-4 w-4 rounded border-neutral-800 text-amber-500 bg-neutral-900 focus:ring-0 focus:ring-offset-0"
+                        />
+                        <label htmlFor="rgpd-check" className="cursor-pointer leading-relaxed text-[11px] sm:text-xs">
+                          He leído y acepto la <span className="text-amber-500 hover:underline font-medium">Política de Privacidad</span> y doy mi consentimiento para el tratamiento de mis datos personales para la gestión de mi reserva. <span className="text-neutral-500 font-medium">/ Responsable:</span> Redouan El Bastrioui.
+                        </label>
+                      </div>
+                      <p className="text-[10px] leading-relaxed text-neutral-500 pl-6 border-l border-neutral-800">
+                        <span className="text-neutral-400 font-semibold uppercase tracking-wider text-[9px] block mb-0.5">Información Básica sobre Protección de Datos:</span>
+                        Tus datos se recopilan únicamente con el fin de procesar y coordinar tu reserva de peluquería/barbería. No se cederán a terceros y se guardan con total confidencialidad. En cualquier momento puedes solicitar el acceso, rectificación o la eliminación inmediata de tus datos de la base de datos de citas de forma gratuita.
+                      </p>
                     </div>
                   </div>
 

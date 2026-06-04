@@ -25,11 +25,18 @@ export default function Reviews() {
     async function loadReviews() {
       try {
         const data = await fetchAllReviews();
-        // Since we emptied out REVIEWS in data.ts, we can just load from our live backend db.
-        // We can append predefined static ones if they exist, but we deleted them based on instructions.
-        setReviewsList(data);
+        // Merge fetched reviews with the static permanent ones
+        const combined = [...data];
+        REVIEWS.forEach(staticReview => {
+          if (!combined.some(r => r.id === staticReview.id)) {
+            combined.push(staticReview);
+          }
+        });
+        setReviewsList(combined);
       } catch (e) {
         console.error("Error fetching reviews:", e);
+        // Fallback to permanent reviews if API fails
+        setReviewsList(REVIEWS);
       }
     }
     loadReviews();

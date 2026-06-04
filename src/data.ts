@@ -11,7 +11,7 @@ export const SERVICES: Service[] = [
     name: 'Corte de Pelo',
     price: 8,
     duration: 30,
-    description: 'Corte clásico o moderno adaptado a tu estilo. Lavado e hidratación incluidos.',
+    description: 'Corte clásico o moderno adaptado a tu estilo.',
     category: 'pelo',
   },
   {
@@ -19,7 +19,7 @@ export const SERVICES: Service[] = [
     name: 'Afeitado de Barba con Navaja',
     price: 5,
     duration: 15,
-    description: 'Afeitado tradicional a navaja con toalla caliente, espuma premium y bálsamo refrescante para cuidar tu piel.',
+    description: 'Afeitado tradicional a navaja.',
     category: 'barba',
   },
   {
@@ -27,7 +27,7 @@ export const SERVICES: Service[] = [
     name: 'Degradado y Perfilado de Barba',
     price: 5,
     duration: 15,
-    description: 'Arreglo de barba con degradado degradando patillas, perfilado meticuloso con navaja y nutrición con aceites esenciales.',
+    description: 'Arreglo de barba con degradado degradando patillas y perfilado meticuloso con navaja.',
     category: 'barba',
   },
   {
@@ -40,7 +40,29 @@ export const SERVICES: Service[] = [
   }
 ];
 
-export const REVIEWS: Review[] = [];
+export const REVIEWS: Review[] = [
+  {
+    id: "rev-static-1",
+    author: "Martin",
+    rating: 5,
+    comment: "Excelente peluquería, Redouan es un auténtico profesional. El corte a 8€ es insuperable por esta calidad en todo Rubí.",
+    date: "2026-05-12"
+  },
+  {
+    id: "rev-static-2",
+    author: "Dani",
+    rating: 5,
+    comment: "El afeitado tradicional a navaja y degradado espectacular. Un trato de diez y local impecable. Muy recomendado.",
+    date: "2026-05-24"
+  },
+  {
+    id: "rev-static-3",
+    author: "Alberto",
+    rating: 5,
+    comment: "Mi peluquería habitual desde 2023. Amable, puntual y corte impecable en Carrer de Lumière. El mejor precio-servicio.",
+    date: "2026-06-01"
+  }
+];
 
 export const OPENING_HOURS: OpeningHours = {
   days: 'Lunes a Sábado',

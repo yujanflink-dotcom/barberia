@@ -103,16 +103,6 @@ export default function Hero({ onScrollTo }: HeroProps) {
           </span>
         </motion.h1>
 
-        {/* Brand Narrative Statement */}
-        <motion.p
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 1.2, delay: 0.6 }}
-          className="max-w-2xl text-base sm:text-lg md:text-xl text-neutral-300 font-sans leading-relaxed tracking-wide mb-10"
-        >
-          Cortes con precisión, afeitados tradicionales a navaja y el mejor perfilado de barba. Experimenta el auténtico arte de la barbería en Rubí.
-        </motion.p>
-
         {/* CTA Button Actions */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}

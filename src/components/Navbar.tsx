@@ -34,7 +34,6 @@ export default function Navbar({ onScrollTo, activeSection, savedAppointmentsCou
     { id: 'inicio', label: 'Inicio' },
     { id: 'servicios', label: 'Servicios' },
     { id: 'reservar', label: 'Reservar' },
-    { id: 'resenas', label: 'Opiniones' },
     { id: 'contacto', label: 'Contacto' },
   ];
 

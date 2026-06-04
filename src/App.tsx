@@ -93,7 +93,7 @@ export default function App() {
     window.addEventListener('hashchange', checkUserRoleAndPath);
 
     const handleScroll = () => {
-      const sections = ['inicio', 'servicios', 'reservar', 'resenas', 'contacto'];
+      const sections = ['inicio', 'servicios', 'reservar', 'contacto'];
       const scrollPos = window.scrollY + 200;
 
       for (const sectionId of sections) {
@@ -325,9 +325,6 @@ export default function App() {
         onBookingCreated={updateAppointmentsList}
         bookingsList={bookingsList}
       />
-
-      {/* Ratings and Reviews */}
-      <Reviews />
 
       {/* Map, Directions and Working Hours */}
       <MapAndContact />

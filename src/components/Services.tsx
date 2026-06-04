@@ -76,12 +76,7 @@ export default function Services({ onSelectService, selectedServiceIds }: Servic
                     : 'border-neutral-800 bg-neutral-900/40 hover:border-neutral-700 hover:bg-neutral-900/70'
                 }`}
               >
-                {/* Highlight Badge for featured Combos */}
-                {service.category === 'combo' && (
-                  <span className="absolute -top-3 right-6 bg-amber-500 text-neutral-950 font-mono text-[10px] uppercase font-bold tracking-widest px-3 py-1 rounded-full flex items-center gap-1">
-                    <Award className="w-3 h-3" /> Ahorro
-                  </span>
-                )}
+                {/* Highlight Badge removed */}
 
                 <div>
                   {/* Category Icon */}
@@ -135,29 +130,6 @@ export default function Services({ onSelectService, selectedServiceIds }: Servic
             );
           })}
         </div>
-
-        {/* Informative Value banner */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          whileInView={{ opacity: 1 }}
-          viewport={{ once: true }}
-          className="mt-16 p-6 rounded-xl border border-neutral-800/80 bg-neutral-900/20 max-w-3xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-6"
-        >
-          <div className="text-center sm:text-left">
-            <h4 className="font-serif text-lg text-white font-semibold">¿Necesitas algo a medida?</h4>
-            <p className="text-xs sm:text-sm text-neutral-400 mt-1">
-              Habla directamente con Redouan para cortes de diseño especiales, tintes o tratamientos únicos.
-            </p>
-          </div>
-          <a
-            id="services-fast-call"
-            href={`tel:${BARBER_CONTACT.phone}`}
-            className="flex items-center space-x-2 text-sm text-amber-500 hover:text-amber-400 font-mono tracking-widest font-semibold uppercase shrink-0 transition-colors"
-          >
-            <span>Llamar por teléfono</span>
-            <span className="text-lg">→</span>
-          </a>
-        </motion.div>
 
       </div>
     </section>

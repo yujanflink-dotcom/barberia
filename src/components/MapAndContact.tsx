@@ -170,7 +170,7 @@ export default function MapAndContact() {
                 <h3 className="text-xl font-serif text-white uppercase tracking-wider font-bold">Mapa e Indicaciones</h3>
                 <a
                   id="maps-navigation-anchor"
-                  href={`https://www.google.com/maps/search/?api=1&query=Carrer+de+Lumi%C3%A8re+6+Rubi+Barcelona`}
+                  href="https://www.google.com/maps/search/?api=1&query=Carrer+de+Lumi%C3%A8re+6+local+5+08191+Rubi+Barcelona"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-xs text-amber-500 hover:underline flex items-center space-x-1.5 font-mono"
@@ -189,19 +189,19 @@ export default function MapAndContact() {
                 {/* Graphic Simulated Carrers layout */}
                 <div className="absolute inset-0 z-0 flex flex-col justify-around py-4">
                   <div className="h-4 bg-neutral-950/40 w-full transform -rotate-6 flex items-center justify-center">
-                    <span className="text-[9px] font-mono text-neutral-600 tracking-widest uppercase">Av. de Mònaco</span>
+                    <span className="text-[9px] font-mono text-neutral-600 tracking-widest uppercase">Avinguda d'Edison</span>
                   </div>
                   <div className="h-10 bg-neutral-950/80 w-full transform -rotate-12 flex items-center px-12 border-y border-neutral-850">
                     <span className="text-[10px] font-mono text-amber-500/70 tracking-widest uppercase font-semibold">Carrer de Lumière</span>
                   </div>
                   <div className="h-4 bg-neutral-950/40 w-full transform -rotate-6 flex items-center justify-center">
-                    <span className="text-[9px] font-mono text-neutral-600 tracking-widest uppercase">Carrer de París</span>
+                    <span className="text-[9px] font-mono text-neutral-600 tracking-widest uppercase">Carrer de l'Esport</span>
                   </div>
                 </div>
 
                 {/* Vertical crossing street representation */}
                 <div className="absolute left-1/3 top-0 bottom-0 w-8 bg-neutral-950/60 transform rotate-12 z-0 border-x border-neutral-850/45 flex items-center justify-center">
-                  <span className="text-[8px] font-mono text-neutral-600 uppercase tracking-[0.2em] transform -rotate-90">Carrer d'Itàlia</span>
+                  <span className="text-[8px] font-mono text-neutral-600 uppercase tracking-[0.2em] transform -rotate-90">Carrer d'Astúries</span>
                 </div>
 
                 {/* Pin layout visual pointer */}
