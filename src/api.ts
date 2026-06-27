@@ -5,9 +5,21 @@ import { createClient } from "@supabase/supabase-js";
 const supabaseUrl = (import.meta as any).env.VITE_SUPABASE_URL || "";
 const supabaseAnonKey = (import.meta as any).env.VITE_SUPABASE_ANON_KEY || "";
 
-export const supabase = (supabaseUrl && supabaseAnonKey)
-  ? createClient(supabaseUrl, supabaseAnonKey)
-  : null;
+let supabaseClient = null;
+if (supabaseUrl && supabaseAnonKey) {
+  try {
+    // Validate basic URL format before initializing to prevent Supabase JS from throwing during load
+    if (supabaseUrl.startsWith("http://") || supabaseUrl.startsWith("https://")) {
+      supabaseClient = createClient(supabaseUrl, supabaseAnonKey);
+    } else {
+      console.warn("La URL de Supabase no es válida. Debe comenzar con http:// o https://");
+    }
+  } catch (err) {
+    console.error("Error crítico al inicializar el cliente de Supabase:", err);
+  }
+}
+
+export const supabase = supabaseClient;
 
 if (supabase) {
   console.log("Supabase client initialized successfully. Connected to: ", supabaseUrl);

@@ -146,7 +146,8 @@ export default function BookingForm({ selectedServiceIds, onToggleService, onBoo
 
   // Helper inside Component body to compute booking duration and overlaps
   const getBookingDuration = (b: Booking) => {
-    if (b.phone === 'ORGANIZACIÓN' && b.totalDuration && b.totalDuration > 0) {
+    const isBlock = b.phone === 'ORGANIZACIÓN' || (b.id && b.id.startsWith('block-'));
+    if (isBlock && b.totalDuration && b.totalDuration > 0) {
       return b.totalDuration;
     }
     // Normal client appointments are restricted to 30 min (1 square/slot)
