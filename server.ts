@@ -79,14 +79,11 @@ const SERVICE_DURATIONS: Record<string, number> = {
 };
 
 function getBookingDuration(b: any): number {
-  if (b.totalDuration && b.totalDuration > 0) return b.totalDuration;
-  if (Array.isArray(b.services) && b.services.length > 0) {
-    let sum = 0;
-    for (const sId of b.services) {
-      sum += SERVICE_DURATIONS[sId] || 30;
-    }
-    return sum > 0 ? sum : 30;
+  if (b.phone === 'ORGANIZACIÓN' && b.totalDuration && b.totalDuration > 0) {
+    return b.totalDuration;
   }
+  // All normal client reservations (including 45-minute combos) are restricted to 30 min (1 square/slot)
+  // so they don't block subsequent squares in the schedule.
   return 30;
 }
 

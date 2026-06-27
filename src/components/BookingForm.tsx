@@ -146,12 +146,10 @@ export default function BookingForm({ selectedServiceIds, onToggleService, onBoo
 
   // Helper inside Component body to compute booking duration and overlaps
   const getBookingDuration = (b: Booking) => {
-    if (b.totalDuration && b.totalDuration > 0) return b.totalDuration;
-    if (b.services && b.services.length > 0) {
-      const bServices = SERVICES.filter(s => b.services.includes(s.id));
-      const calc = bServices.reduce((sum, s) => sum + s.duration, 0);
-      return calc > 0 ? calc : 30;
+    if (b.phone === 'ORGANIZACIÓN' && b.totalDuration && b.totalDuration > 0) {
+      return b.totalDuration;
     }
+    // Normal client appointments are restricted to 30 min (1 square/slot)
     return 30;
   };
 
@@ -1227,7 +1225,7 @@ export default function BookingForm({ selectedServiceIds, onToggleService, onBoo
                     if (b.date !== manDate) return false;
                     const [bH, bM] = b.time.split(':').map(Number);
                     const bStart = bH * 60 + bM;
-                    const bDur = b.totalDuration || 30;
+                    const bDur = getBookingDuration(b);
                     const bEnd = bStart + bDur;
                     return startMinutes >= bStart && startMinutes < bEnd;
                   });
@@ -1651,6 +1649,9 @@ export default function BookingForm({ selectedServiceIds, onToggleService, onBoo
                           const isSun = isDateSunday(day.date);
                           const isToday = formatDateString(new Date()) === dateStr;
                           const isMuted = !day.isCurrentMonth;
+                          const isBlocked = allBookings.some(
+                            (b) => b.date === dateStr && b.phone === 'ORGANIZACIÓN' && b.totalDuration && b.totalDuration >= 720
+                          );
 
                           let cellStyle = "aspect-square relative flex flex-col items-center justify-center rounded-lg transition-all text-xs sm:text-sm border border-transparent ";
                           let clickHandler = undefined;
@@ -1659,6 +1660,8 @@ export default function BookingForm({ selectedServiceIds, onToggleService, onBoo
                             cellStyle += "text-neutral-700 cursor-not-allowed line-through bg-neutral-950/10";
                           } else if (isSun) {
                             cellStyle += "text-red-500/45 bg-red-950/10 border-red-950/20 cursor-not-allowed";
+                          } else if (isBlocked) {
+                            cellStyle += "text-red-500/50 bg-red-950/5 border-red-950/15 cursor-not-allowed opacity-80";
                           } else if (isMuted) {
                             cellStyle += "text-neutral-800 cursor-not-allowed opacity-25";
                           } else {
@@ -1679,14 +1682,17 @@ export default function BookingForm({ selectedServiceIds, onToggleService, onBoo
                               key={`${dateStr}-${idx}`}
                               type="button"
                               onClick={clickHandler}
-                              disabled={isPast || isSun || isMuted}
+                              disabled={isPast || isSun || isMuted || isBlocked}
                               className={cellStyle}
                             >
                               <span className="font-semibold block">{day.dayNum}</span>
                               {isSun && (
                                 <span className="absolute bottom-1 text-[7px] text-red-500 uppercase tracking-tighter">Cerrado</span>
                               )}
-                              {isToday && !isSelected && !isSun && (
+                              {isBlocked && !isSun && (
+                                <span className="absolute bottom-1 text-[7px] text-red-400 font-bold uppercase tracking-tighter">Cerrado</span>
+                              )}
+                              {isToday && !isSelected && !isSun && !isBlocked && (
                                 <span className="absolute bottom-1 w-1 h-1 bg-amber-500 rounded-full" />
                               )}
                             </button>
@@ -1720,6 +1726,39 @@ export default function BookingForm({ selectedServiceIds, onToggleService, onBoo
                       <p className="text-red-400 text-xs sm:text-sm">La barbería está cerrada los domingos. Por favor cambia la fecha arriba.</p>
                     ) : (
                       <div className="space-y-6">
+                        {/* Organization Block Notifications */}
+                        {(() => {
+                          const orgBlocks = allBookings.filter(b => b.date === bookingDate && b.phone === 'ORGANIZACIÓN');
+                          const hasFullBlock = orgBlocks.some(b => b.totalDuration && b.totalDuration >= 720);
+                          const hasMorningBlock = orgBlocks.some(b => b.totalDuration && b.totalDuration === 300 && b.time === '09:00');
+                          
+                          return (
+                            <>
+                              {hasFullBlock && orgBlocks.filter(b => b.totalDuration && b.totalDuration >= 720).map(b => (
+                                <div key={b.id} className="p-4 rounded-xl border border-red-900/30 bg-red-950/20 text-red-100 text-xs sm:text-sm space-y-1 shadow-lg">
+                                  <p className="font-bold flex items-center gap-1.5 uppercase font-mono text-[10px] sm:text-xs tracking-wider text-red-400">
+                                    <span>🚫 JORNADA COMPLETAMENTE CERRADA</span>
+                                  </p>
+                                  <p className="text-neutral-300 font-sans">
+                                    El responsable ha bloqueado este día: <span className="text-white font-medium">"{b.name.replace('🚫', '').trim()}"</span>. Sentimos las molestias.
+                                  </p>
+                                </div>
+                              ))}
+                              
+                              {!hasFullBlock && hasMorningBlock && orgBlocks.filter(b => b.totalDuration && b.totalDuration === 300 && b.time === '09:00').map(b => (
+                                <div key={b.id} className="p-4 rounded-xl border border-amber-900/30 bg-amber-950/25 text-amber-100 text-xs sm:text-sm space-y-1 shadow-md">
+                                  <p className="font-bold flex items-center gap-1.5 uppercase font-mono text-[10px] sm:text-xs tracking-wider text-amber-400">
+                                    <span>⏳ APERTURA DE TARDE</span>
+                                  </p>
+                                  <p className="text-neutral-300 font-sans">
+                                    Aviso: <span className="text-white font-medium">"{b.name.replace('⏳', '').trim()}"</span>. El turno de mañana estará cerrado y abriremos a partir de las 16:00 h.
+                                  </p>
+                                </div>
+                              ))}
+                            </>
+                          );
+                        })()}
+
                         {/* Morning Shift */}
                         <div>
                           <p className="text-xs uppercase tracking-widest text-neutral-400 mb-3 font-semibold font-mono">Turno de Mañana (09:00 - 14:00)</p>
