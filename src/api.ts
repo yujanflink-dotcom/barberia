@@ -25,24 +25,41 @@ export async function fetchAllBookings(): Promise<Booking[]> {
     try {
       const { data, error } = await supabase
         .from("reservas")
-        .select("*")
-        .order("createdAt", { ascending: false });
+        .select("*");
 
       if (error) throw error;
       if (data) {
-        // Map any snake_case fields or ensure fields are aligned with Booking interface
-        const bookings: Booking[] = data.map((b: any) => ({
-          id: b.id,
-          name: b.name,
-          phone: b.phone,
-          date: b.date,
-          time: b.time,
-          services: b.services || [],
-          notes: b.notes || "",
-          totalPrice: Number(b.totalPrice),
-          totalDuration: Number(b.totalDuration),
-          createdAt: Number(b.createdAt)
-        }));
+        // Map any snake_case, camelCase or Spanish fields and ensure they align with the Booking interface
+        const bookings: Booking[] = data.map((b: any) => {
+          let createdAtVal = Date.now();
+          if (b.created_at !== undefined && b.created_at !== null) {
+            if (typeof b.created_at === 'string') {
+              const parsedDate = new Date(b.created_at).getTime();
+              createdAtVal = !isNaN(parsedDate) ? parsedDate : Date.now();
+            } else if (typeof b.created_at === 'number') {
+              createdAtVal = b.created_at;
+            }
+          } else if (b.createdAt !== undefined && b.createdAt !== null) {
+            createdAtVal = Number(b.createdAt);
+          }
+
+          return {
+            id: b.id,
+            name: b.nombre !== undefined ? b.nombre : (b.name !== undefined ? b.name : ""),
+            phone: b.telefono !== undefined ? b.telefono : (b.phone !== undefined ? b.phone : ""),
+            date: b.fecha !== undefined ? b.fecha : (b.date !== undefined ? b.date : ""),
+            time: b.hora !== undefined ? b.hora : (b.time !== undefined ? b.time : ""),
+            services: b.servicios !== undefined ? b.servicios : (b.services || []),
+            notes: b.notas !== undefined ? b.notas : (b.notes || ""),
+            totalPrice: Number(b.precio_total !== undefined ? b.precio_total : (b.total_price !== undefined ? b.total_price : (b.totalPrice || 0))),
+            totalDuration: Number(b.duracion_total !== undefined ? b.duracion_total : (b.total_duration !== undefined ? b.total_duration : (b.totalDuration || 0))),
+            createdAt: createdAtVal
+          };
+        });
+
+        // Sort by createdAt descending in-memory to avoid DB-level column exceptions
+        bookings.sort((a, b) => b.createdAt - a.createdAt);
+
         localStorage.setItem("elbastrioui_bookings", JSON.stringify(bookings));
         return bookings;
       }
@@ -135,23 +152,59 @@ export async function createNewBooking(booking: Booking): Promise<Booking> {
       // First, check if there is a conflict for this date and time (excluding force blocks/orgs)
       const isForced = booking.phone === "ORGANIZACIÓN" || booking.id.startsWith("block-");
       if (!isForced) {
-        const { data: existingBookings, error: checkError } = await supabase
-          .from("reservas")
-          .select("*")
-          .eq("date", booking.date);
+        let existingBookings: any[] = [];
+        let queryError: any = null;
 
-        if (!checkError && existingBookings) {
+        // Try querying using Spanish schema 'fecha' first
+        try {
+          const { data, error } = await supabase
+            .from("reservas")
+            .select("*")
+            .eq("fecha", booking.date);
+          if (!error && data) {
+            existingBookings = data;
+          } else {
+            queryError = error;
+          }
+        } catch (e) {
+          queryError = e;
+        }
+
+        // Try querying using English schema 'date' as a fallback if the first failed or returned nothing
+        if (existingBookings.length === 0 || queryError) {
+          try {
+            const { data, error } = await supabase
+              .from("reservas")
+              .select("*")
+              .eq("date", booking.date);
+            if (!error && data) {
+              existingBookings = data;
+            }
+          } catch {}
+        }
+
+        if (existingBookings && existingBookings.length > 0) {
           const hasConflict = existingBookings.some((b: any) => {
-            if (b.phone === "ORGANIZACIÓN" || b.id.startsWith("block-")) return false;
-            // Calculate start and end times
+            const bPhone = b.telefono !== undefined ? b.telefono : b.phone;
+            const bId = b.id || "";
+            const bTime = b.hora !== undefined ? b.hora : b.time;
+            const bDuration = b.duracion_total !== undefined ? b.duracion_total : (b.total_duration !== undefined ? b.total_duration : (b.totalDuration || 30));
+
+            // Calculate start and end times for the client's booking
+            // Treat all client bookings as taking exactly 30 minutes (1 slot/square) for conflict calculations, 
+            // so we don't block adjacent hours due to service duration.
             const [h1, m1] = booking.time.split(":").map(Number);
             const start1 = h1 * 60 + m1;
-            const dur1 = booking.totalDuration || 30;
+            const dur1 = 30; 
             const end1 = start1 + dur1;
 
-            const [h2, m2] = b.time.split(":").map(Number);
+            if (!bTime) return false;
+            const [h2, m2] = bTime.split(":").map(Number);
             const start2 = h2 * 60 + m2;
-            const dur2 = b.totalDuration || 30;
+            
+            // If the existing booking is a blockage, it keeps its full duration (e.g., block-full, etc.), otherwise 30 minutes
+            const isBForced = bPhone === "ORGANIZACIÓN" || bId.startsWith("block-");
+            const dur2 = isBForced ? (bDuration || 30) : 30;
             const end2 = start2 + dur2;
 
             return (start1 >= start2 && start1 < end2) || (start2 >= start1 && start2 < end1);
@@ -161,25 +214,139 @@ export async function createNewBooking(booking: Booking): Promise<Booking> {
             throw new Error("Este horario ya ha sido reservado. Por favor, selecciona otra hora o fecha.");
           }
         }
+      }      // Try standard Spanish schema (most common for this user setup)
+      let primaryError: any = null;
+      let saveError: any = null;
+      let savedSuccessfully = false;
+
+      try {
+        const spanishPayload: any = {
+          id: booking.id,
+          nombre: booking.name,
+          telefono: booking.phone,
+          fecha: booking.date,
+          hora: booking.time,
+          servicios: booking.services,
+          notas: booking.notes || "",
+          precio_total: booking.totalPrice,
+          duracion_total: booking.totalDuration,
+          created_at: new Date(booking.createdAt).toISOString()
+        };
+
+        const { error: err } = await supabase
+          .from("reservas")
+          .upsert([spanishPayload]);
+
+        if (!err) {
+          savedSuccessfully = true;
+        } else {
+          primaryError = err;
+          saveError = err;
+        }
+      } catch (err) {
+        primaryError = err;
+        saveError = err;
       }
 
-      const { data, error } = await supabase
-        .from("reservas")
-        .upsert([{
-          id: booking.id,
-          name: booking.name,
-          phone: booking.phone,
-          date: booking.date,
-          time: booking.time,
-          services: booking.services,
-          notes: booking.notes || "",
-          totalPrice: booking.totalPrice,
-          totalDuration: booking.totalDuration,
-          createdAt: booking.createdAt
-        }])
-        .select();
+      // If that failed, try standard snake_case schema (English)
+      if (!savedSuccessfully) {
+        try {
+          const snakePayload: any = {
+            id: booking.id,
+            name: booking.name,
+            phone: booking.phone,
+            date: booking.date,
+            time: booking.time,
+            services: booking.services,
+            notes: booking.notes || "",
+            total_price: booking.totalPrice,
+            total_duration: booking.totalDuration,
+            created_at: new Date(booking.createdAt).toISOString()
+          };
 
-      if (error) throw error;
+          const { error: err } = await supabase
+            .from("reservas")
+            .upsert([snakePayload]);
+
+          if (!err) {
+            savedSuccessfully = true;
+          } else {
+            saveError = err;
+          }
+        } catch (err) {
+          saveError = err;
+        }
+      }
+
+      // If that failed, try camelCase schema (if they manually created camelCase columns)
+      if (!savedSuccessfully) {
+        try {
+          const camelPayload: any = {
+            id: booking.id,
+            name: booking.name,
+            phone: booking.phone,
+            date: booking.date,
+            time: booking.time,
+            services: booking.services,
+            notes: booking.notes || "",
+            totalPrice: booking.totalPrice,
+            totalDuration: booking.totalDuration,
+            createdAt: booking.createdAt
+          };
+
+          const { error: err } = await supabase
+            .from("reservas")
+            .upsert([camelPayload]);
+
+          if (!err) {
+            savedSuccessfully = true;
+          } else {
+            saveError = err;
+          }
+        } catch (err) {
+          saveError = err;
+        }
+      }
+
+      // If all failed, try a minimalist payload with only core fields that are guaranteed to exist
+      if (!savedSuccessfully) {
+        try {
+          console.warn("Attempting minimalist database save fallback due to schema mismatch:", saveError);
+          const minimalPayload: any = {
+            id: booking.id,
+            name: booking.name,
+            phone: booking.phone,
+            date: booking.date,
+            time: booking.time,
+            services: booking.services,
+            notes: booking.notes || ""
+          };
+
+          const { error: err } = await supabase
+            .from("reservas")
+            .upsert([minimalPayload]);
+
+          if (!err) {
+            savedSuccessfully = true;
+          } else {
+            saveError = err;
+          }
+        } catch (err) {
+          saveError = err;
+        }
+      }
+
+      // If all database attempts failed, throw the primary error (Spanish schema) or the last received error
+      if (!savedSuccessfully) {
+        const finalError = primaryError || saveError;
+        if (finalError) {
+          // If it is a uuid parsing error, make it user-friendly
+          if (finalError.message && finalError.message.includes("uuid")) {
+            throw new Error("Error de base de datos: El identificador de la reserva no coincide con el tipo UUID de la tabla. Por favor, asegúrate de recrear la tabla utilizando TEXT como tipo para la columna ID.");
+          }
+          throw finalError;
+        }
+      }
 
       // Sync local storage
       try {
