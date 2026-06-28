@@ -31,6 +31,27 @@ const API_URL = "/api/bookings";
 const REVIEWS_API_URL = "/api/reviews";
 
 // Safely attempts to fetch bookings from the Express server or Supabase.
+function parseServices(servicesField: any): string[] {
+  if (!servicesField) return [];
+  if (Array.isArray(servicesField)) return servicesField;
+  if (typeof servicesField === "string") {
+    const trimmed = servicesField.trim();
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {}
+    }
+    // PostgreSQL array format: {corte,barba}
+    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+      return trimmed.slice(1, -1).split(",").map(s => s.trim()).filter(Boolean);
+    }
+    // Simple comma-separated list
+    return trimmed.split(",").map(s => s.trim()).filter(Boolean);
+  }
+  return [];
+}
+
 export async function fetchAllBookings(): Promise<Booking[]> {
   // If Supabase is configured, use it directly (ideal for static hosts like Netlify)
   if (supabase) {
@@ -55,13 +76,15 @@ export async function fetchAllBookings(): Promise<Booking[]> {
             createdAtVal = Number(b.createdAt);
           }
 
+          const rawServices = b.servicios !== undefined ? b.servicios : (b.services || []);
+
           return {
             id: b.id,
             name: b.nombre !== undefined ? b.nombre : (b.name !== undefined ? b.name : ""),
             phone: b.telefono !== undefined ? b.telefono : (b.phone !== undefined ? b.phone : ""),
             date: b.fecha !== undefined ? b.fecha : (b.date !== undefined ? b.date : ""),
             time: b.hora !== undefined ? b.hora : (b.time !== undefined ? b.time : ""),
-            services: b.servicios !== undefined ? b.servicios : (b.services || []),
+            services: parseServices(rawServices),
             notes: b.notas !== undefined ? b.notas : (b.notes || ""),
             totalPrice: Number(b.precio_total !== undefined ? b.precio_total : (b.total_price !== undefined ? b.total_price : (b.totalPrice || 0))),
             totalDuration: Number(b.duracion_total !== undefined ? b.duracion_total : (b.total_duration !== undefined ? b.total_duration : (b.totalDuration || 0))),
@@ -489,12 +512,21 @@ export async function fetchAllReviews(): Promise<Review[]> {
     try {
       const { data, error } = await supabase
         .from("opiniones")
-        .select("*")
-        .order("date", { ascending: false });
+        .select("*");
 
       if (error) throw error;
       if (data) {
-        const reviews: Review[] = data;
+        const reviews: Review[] = data.map((r: any) => ({
+          id: r.id || Math.random().toString(36).substring(2, 9),
+          author: r.author !== undefined && r.author !== null ? r.author : (r.autor !== undefined && r.autor !== null ? r.autor : (r.nombre !== undefined && r.nombre !== null ? r.nombre : "Anónimo")),
+          rating: Number(r.rating !== undefined && r.rating !== null ? r.rating : (r.puntuacion !== undefined && r.puntuacion !== null ? r.puntuacion : (r.valoracion !== undefined && r.valoracion !== null ? r.valoracion : 5))),
+          comment: r.comment !== undefined && r.comment !== null ? r.comment : (r.comentario !== undefined && r.comentario !== null ? r.comentario : (r.mensaje !== undefined && r.mensaje !== null ? r.mensaje : "")),
+          date: r.date !== undefined && r.date !== null ? r.date : (r.fecha !== undefined && r.fecha !== null ? r.fecha : "")
+        }));
+
+        // Sort by date descending in-memory
+        reviews.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
         localStorage.setItem("elbastrioui_reviews", JSON.stringify(reviews));
         return reviews;
       }

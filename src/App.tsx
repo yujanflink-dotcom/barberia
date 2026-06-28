@@ -196,7 +196,8 @@ export default function App() {
   };
 
   const getServiceNamesText = (servicesIds: string[]) => {
-    return SERVICES.filter(s => servicesIds.includes(s.id))
+    if (!servicesIds || !Array.isArray(servicesIds)) return '';
+    return SERVICES.filter(s => s && servicesIds.includes(s.id))
       .map(s => s.name)
       .join(', ');
   };
@@ -263,7 +264,7 @@ export default function App() {
     );
   }
 
-  const clientBookings = bookingsList.filter(b => myBookingIds.includes(b.id));
+  const clientBookings = (bookingsList || []).filter(b => b && b.id && (myBookingIds || []).includes(b.id));
 
   return (
     <div className="bg-neutral-950 font-sans min-h-screen selection:bg-amber-500 selection:text-neutral-950">

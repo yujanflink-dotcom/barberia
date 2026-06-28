@@ -491,7 +491,8 @@ export default function BookingForm({ selectedServiceIds, onToggleService, onBoo
   };
 
   const getServicesNames = (servicesIds: string[]) => {
-    return SERVICES.filter(s => servicesIds.includes(s.id))
+    if (!servicesIds || !Array.isArray(servicesIds)) return '';
+    return SERVICES.filter(s => s && servicesIds.includes(s.id))
       .map(s => s.name)
       .join(', ');
   };

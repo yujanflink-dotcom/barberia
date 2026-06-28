@@ -228,17 +228,24 @@ export default function Reviews() {
                 <div>
                   {/* Rating score */}
                   <div className="flex items-center space-x-0.5 text-amber-500 mb-4">
-                    {[...Array(rev.rating)].map((_, i) => (
-                      <Star key={i} className="w-3.5 h-3.5 fill-current" />
-                    ))}
-                    {[...Array(5 - rev.rating)].map((_, i) => (
-                      <Star key={i} className="w-3.5 h-3.5 text-neutral-700" />
-                    ))}
+                    {(() => {
+                      const rating = Math.min(5, Math.max(1, Number(rev.rating) || 5));
+                      return (
+                        <>
+                          {[...Array(rating)].map((_, i) => (
+                            <Star key={i} className="w-3.5 h-3.5 fill-current" />
+                          ))}
+                          {[...Array(5 - rating)].map((_, i) => (
+                            <Star key={i} className="w-3.5 h-3.5 text-neutral-700" />
+                          ))}
+                        </>
+                      );
+                    })()}
                   </div>
 
                   {/* Comment quote */}
                   <p className="text-neutral-300 text-xs sm:text-sm leading-relaxed italic mb-6">
-                    "{rev.comment}"
+                    "{rev.comment || ""}"
                   </p>
                 </div>
 
@@ -246,14 +253,14 @@ export default function Reviews() {
                 <div className="flex items-center justify-between border-t border-neutral-800/80 pt-4 mt-auto">
                   <div className="flex items-center space-x-3">
                     <div className="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center text-amber-500 font-bold text-xs">
-                      {rev.author[0].toUpperCase()}
+                      {rev.author ? rev.author[0].toUpperCase() : "A"}
                     </div>
                     <div>
-                      <h5 className="font-semibold text-white text-xs sm:text-sm">{rev.author}</h5>
+                      <h5 className="font-semibold text-white text-xs sm:text-sm">{rev.author || "Anónimo"}</h5>
                       <span className="text-[10px] text-neutral-500 block font-mono">Cliente verificado</span>
                     </div>
                   </div>
-                  <span className="text-[10px] text-neutral-400 font-mono">{rev.date}</span>
+                  <span className="text-[10px] text-neutral-400 font-mono">{rev.date || ""}</span>
                 </div>
               </motion.div>
             ))}
