@@ -79,15 +79,15 @@ export async function fetchAllBookings(): Promise<Booking[]> {
           const rawServices = b.servicios !== undefined ? b.servicios : (b.services || []);
 
           return {
-            id: b.id,
-            name: b.nombre !== undefined ? b.nombre : (b.name !== undefined ? b.name : ""),
-            phone: b.telefono !== undefined ? b.telefono : (b.phone !== undefined ? b.phone : ""),
-            date: b.fecha !== undefined ? b.fecha : (b.date !== undefined ? b.date : ""),
-            time: b.hora !== undefined ? b.hora : (b.time !== undefined ? b.time : ""),
+            id: b.id || "",
+            name: b.nombre ?? b.name ?? "",
+            phone: b.telefono ?? b.phone ?? "",
+            date: b.fecha ?? b.date ?? "",
+            time: b.hora ?? b.time ?? "",
             services: parseServices(rawServices),
-            notes: b.notas !== undefined ? b.notas : (b.notes || ""),
-            totalPrice: Number(b.precio_total !== undefined ? b.precio_total : (b.total_price !== undefined ? b.total_price : (b.totalPrice || 0))),
-            totalDuration: Number(b.duracion_total !== undefined ? b.duracion_total : (b.total_duration !== undefined ? b.total_duration : (b.totalDuration || 0))),
+            notes: b.notas ?? b.notes ?? "",
+            totalPrice: Number(b.precio_total ?? b.total_price ?? b.totalPrice ?? 0),
+            totalDuration: Number(b.duracion_total ?? b.total_duration ?? b.totalDuration ?? 0),
             createdAt: createdAtVal
           };
         });
@@ -228,14 +228,15 @@ export async function createNewBooking(booking: Booking): Promise<Booking> {
             // Calculate start and end times for the client's booking
             // Treat all client bookings as taking exactly 30 minutes (1 slot/square) for conflict calculations, 
             // so we don't block adjacent hours due to service duration.
-            const [h1, m1] = booking.time.split(":").map(Number);
-            const start1 = h1 * 60 + m1;
+            const timeToSplit = booking.time || "00:00";
+            const [h1, m1] = timeToSplit.split(":").map(Number);
+            const start1 = h1 * 60 + (m1 || 0);
             const dur1 = 30; 
             const end1 = start1 + dur1;
 
-            if (!bTime) return false;
+            if (!bTime || typeof bTime !== "string") return false;
             const [h2, m2] = bTime.split(":").map(Number);
-            const start2 = h2 * 60 + m2;
+            const start2 = h2 * 60 + (m2 || 0);
             
             // If the existing booking is a blockage, it keeps its full duration (e.g., block-full, etc.), otherwise 30 minutes
             const isBForced = bPhone === "ORGANIZACIÓN" || bId.startsWith("block-");

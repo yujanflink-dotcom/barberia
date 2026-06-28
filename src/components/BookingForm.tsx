@@ -138,7 +138,13 @@ export default function BookingForm({ selectedServiceIds, onToggleService, onBoo
   // Form states inside owner console for manual appointments & blocks
   const [manName, setManName] = useState('');
   const [manPhone, setManPhone] = useState('');
-  const [manDate, setManDate] = useState('');
+  const [manDate, setManDate] = useState(() => {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  });
   const [manTime, setManTime] = useState('');
   const [manSelectedServices, setManSelectedServices] = useState<string[]>([]);
   const [manNotes, setManNotes] = useState('');
@@ -161,7 +167,7 @@ export default function BookingForm({ selectedServiceIds, onToggleService, onBoo
     const slotMinutes = slotH * 60 + slotM;
 
     return allBookings.some((b) => {
-      if (b.date !== checkDate) return false;
+      if (!b || !b.date || !b.time || b.date !== checkDate) return false;
       
       const [bH, bM] = b.time.split(':').map(Number);
       const bStartMinutes = bH * 60 + bM;
@@ -175,7 +181,7 @@ export default function BookingForm({ selectedServiceIds, onToggleService, onBoo
   const requestedServicesStats = () => {
     const counts: Record<string, number> = {};
     allBookings.forEach((b) => {
-      if (b.services) {
+      if (b && b.services) {
         b.services.forEach((sId) => {
           counts[sId] = (counts[sId] || 0) + 1;
         });
@@ -191,6 +197,73 @@ export default function BookingForm({ selectedServiceIds, onToggleService, onBoo
       }
     });
     return maxCount > 0 ? `${maxId} (${maxCount} veces)` : 'Ninguno aún';
+  };
+
+  const getSlotStatusAndOccupant = (slotTime: string, checkDate: string) => {
+    if (!checkDate) return { status: 'free' as const, booking: null };
+    
+    const [slotH, slotM] = slotTime.split(':').map(Number);
+    const slotMinutes = slotH * 60 + slotM;
+
+    const occupant = allBookings.find((b) => {
+      if (!b || !b.date || !b.time || b.date !== checkDate) return false;
+      
+      const [bH, bM] = b.time.split(':').map(Number);
+      const bStartMinutes = bH * 60 + bM;
+      const bDuration = getBookingDuration(b);
+      const bEndMinutes = bStartMinutes + bDuration;
+
+      return slotMinutes >= bStartMinutes && slotMinutes < bEndMinutes;
+    });
+
+    if (!occupant) {
+      return { status: 'free' as const, booking: null };
+    }
+
+    const isBlock = occupant.phone === 'ORGANIZACIÓN' || (occupant.id && occupant.id.startsWith('block-'));
+    return {
+      status: (isBlock ? 'blocked' : 'booked') as 'free' | 'blocked' | 'booked',
+      booking: occupant
+    };
+  };
+
+  const blockSingleSlot = async (slotTime: string, dateStr: string) => {
+    const reason = window.prompt(`¿Quieres bloquear la hora ${slotTime} del día ${dateStr}? Escribe el motivo (opcional):`, "Descanso / Personal");
+    if (reason === null) return; // user cancelled
+    const finalReason = reason.trim() || "Bloqueado";
+
+    const newBlock: Booking = {
+      id: 'block-single-' + Math.random().toString(36).substring(2, 6),
+      name: `🚫 ${finalReason}`,
+      phone: 'ORGANIZACIÓN',
+      date: dateStr,
+      time: slotTime,
+      services: [],
+      notes: 'Bloqueo rápido de hora individual.',
+      totalPrice: 0,
+      totalDuration: 30, // standard slot is 30 mins
+      createdAt: Date.now()
+    };
+
+    try {
+      await createNewBooking(newBlock);
+      onBookingCreated();
+      setAdminSuccess(`¡Hora ${slotTime} bloqueada con éxito!`);
+    } catch (err: any) {
+      setAdminError(err?.message || 'Error al crear el bloqueo.');
+    }
+  };
+
+  const unblockSingleSlot = async (bookingId: string, slotTime: string) => {
+    if (window.confirm(`¿Quieres desbloquear y volver a activar la hora ${slotTime}?`)) {
+      try {
+        await deleteBookingById(bookingId);
+        onBookingCreated();
+        setAdminSuccess(`¡Hora ${slotTime} desbloqueada y disponible para los clientes!`);
+      } catch (err: any) {
+        setAdminError(err?.message || 'Error al eliminar el bloqueo.');
+      }
+    }
   };
 
   const handleToggleManualService = (id: string) => {
@@ -595,34 +668,43 @@ export default function BookingForm({ selectedServiceIds, onToggleService, onBoo
               
               const filteredList = allBookings
                 .filter((bk) => {
-                  const term = adminSearch.toLowerCase();
+                  if (!bk) return false;
+                  const term = (adminSearch || '').toLowerCase();
+                  const nameVal = (bk.name || '').toLowerCase();
+                  const phoneVal = (bk.phone || '').toLowerCase();
+                  const idVal = (bk.id || '').toLowerCase();
                   const matchesSearch = 
-                    bk.name.toLowerCase().includes(term) ||
-                    bk.phone.toLowerCase().includes(term) ||
-                    bk.id.toLowerCase().includes(term);
+                    nameVal.includes(term) ||
+                    phoneVal.includes(term) ||
+                    idVal.includes(term);
                     
                   if (!matchesSearch) return false;
                   
+                  const bkDate = bk.date || '';
                   if (adminDateFilter === 'today') {
-                    return bk.date === todayStr;
+                    return bkDate === todayStr;
                   } else if (adminDateFilter === 'tomorrow') {
-                    return bk.date === tomorrowStr;
+                    return bkDate === tomorrowStr;
                   } else if (adminDateFilter === 'upcoming') {
-                    return bk.date >= todayStr;
+                    return bkDate >= todayStr;
                   }
                   return true;
                 })
                 .sort((a, b) => {
-                  if (a.date !== b.date) {
-                    return a.date.localeCompare(b.date);
+                  const dateA = a?.date || '';
+                  const dateB = b?.date || '';
+                  const timeA = a?.time || '';
+                  const timeB = b?.time || '';
+                  if (dateA !== dateB) {
+                    return dateA.localeCompare(dateB);
                   }
-                  return a.time.localeCompare(b.time);
+                  return timeA.localeCompare(timeB);
                 });
 
-              const countTotal = allBookings.length;
-              const countToday = allBookings.filter(b => b.date === todayStr).length;
-              const countTomorrow = allBookings.filter(b => b.date === tomorrowStr).length;
-              const countUpcoming = allBookings.filter(b => b.date >= todayStr).length;
+              const countTotal = allBookings.filter(Boolean).length;
+              const countToday = allBookings.filter(b => b && b.date === todayStr).length;
+              const countTomorrow = allBookings.filter(b => b && b.date === tomorrowStr).length;
+              const countUpcoming = allBookings.filter(b => b && b.date && b.date >= todayStr).length;
 
               return (
                 <div className="space-y-6">
@@ -965,219 +1047,371 @@ export default function BookingForm({ selectedServiceIds, onToggleService, onBoo
             })()}
 
             {adminActiveTab === 'block' && (
-              <div className="space-y-8 max-w-xl mx-auto">
-                {/* Panel de Incidencias y Bloqueos de Emergencia (Quick Closures) */}
-                <div className="bg-gradient-to-br from-red-950/20 via-neutral-900 to-neutral-950 border border-red-900/40 rounded-xl p-5 space-y-4 shadow-xl">
-                  <div className="flex items-center gap-2 pb-1 border-b border-neutral-800">
-                    <span className="text-lg">⚠️</span>
-                    <div>
-                      <h4 className="text-xs uppercase font-mono font-bold tracking-wider text-red-300">
-                        Cierre rápido por imprevistos (Redouan)
-                      </h4>
-                      <p className="text-[10px] text-neutral-500 font-mono">Panel del Jefe • Estado Especial</p>
+              <div className="space-y-8 max-w-4xl mx-auto">
+                {/* Visual Header and Date Selector */}
+                <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 shadow-xl space-y-6">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-neutral-800 pb-4">
+                    <div className="flex items-center gap-3">
+                      <span className="text-2xl">🚫</span>
+                      <div>
+                        <h4 className="text-base font-bold font-sans uppercase text-white tracking-wide">
+                          Gestor de Bloqueos de Horas (Jefe)
+                        </h4>
+                        <p className="text-xs text-neutral-400 font-mono">Selecciona un día para ver su agenda y bloquear/desbloquear al instante</p>
+                      </div>
+                    </div>
+
+                    {/* Date Picker */}
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                      <label className="text-xs font-mono font-bold text-neutral-400 uppercase sm:text-right shrink-0">Ver Día:</label>
+                      <input
+                        type="date"
+                        value={manDate}
+                        onChange={(e) => setManDate(e.target.value)}
+                        className="bg-neutral-950 border border-neutral-800 rounded-lg p-2 px-3 text-white font-mono text-xs focus:outline-none focus:border-amber-500"
+                      />
                     </div>
                   </div>
-                  
-                  <p className="text-xs text-neutral-350 leading-relaxed">
-                    Si ocurre cualquier imprevisto personal u familiar, pulsa abajo para cerrar el día entero o demorar la apertura. La agenda de cara al cliente se desactivará de inmediato.
+
+                  {/* Date Quick Shortcuts */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[10px] font-mono uppercase text-neutral-500 font-bold tracking-wider">Accesos Rápidos:</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const today = new Date();
+                        setManDate(formatDateString(today));
+                      }}
+                      className={`px-3 py-1 bg-neutral-950 hover:bg-neutral-850 text-xs rounded border transition-colors font-mono font-semibold cursor-pointer ${
+                        manDate === formatDateString(new Date()) ? 'border-amber-500 text-amber-400' : 'border-neutral-800 text-neutral-400'
+                      }`}
+                    >
+                      Hoy (🕒)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const tomorrow = new Date(Date.now() + 86450000);
+                        setManDate(formatDateString(tomorrow));
+                      }}
+                      className={`px-3 py-1 bg-neutral-950 hover:bg-neutral-850 text-xs rounded border transition-colors font-mono font-semibold cursor-pointer ${
+                        manDate === formatDateString(new Date(Date.now() + 86450000)) ? 'border-amber-500 text-amber-400' : 'border-neutral-800 text-neutral-400'
+                      }`}
+                    >
+                      Mañana (📅)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const dayAfter = new Date(Date.now() + 2 * 86450000);
+                        setManDate(formatDateString(dayAfter));
+                      }}
+                      className={`px-3 py-1 bg-neutral-950 hover:bg-neutral-850 text-xs rounded border transition-colors font-mono font-semibold cursor-pointer ${
+                        manDate === formatDateString(new Date(Date.now() + 2 * 86450000)) ? 'border-amber-500 text-amber-400' : 'border-neutral-800 text-neutral-400'
+                      }`}
+                    >
+                      Pasado Mañana
+                    </button>
+                  </div>
+
+                  {/* Quick Emergency Closure Buttons */}
+                  <div className="bg-neutral-950/60 p-4.5 rounded-xl border border-neutral-850 space-y-3">
+                    <div className="flex items-center gap-1.5 text-xs font-mono font-bold text-red-400 uppercase tracking-wide">
+                      <span>⚠️ Acciones de Cierre de Emergencia para el {manDate}:</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => handleQuickBlock('manual', 'full')}
+                        className="flex items-center justify-center gap-2 py-2.5 bg-red-950/20 hover:bg-red-950/40 text-red-400 border border-red-900/50 hover:border-red-800 rounded-lg text-xs font-semibold cursor-pointer transition-colors active:scale-[0.99]"
+                      >
+                        🚫 Cerrar Día Completo ({manDate})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleQuickBlock('manual', 'morning_only')}
+                        className="flex items-center justify-center gap-2 py-2.5 bg-amber-950/20 hover:bg-amber-950/40 text-amber-400 border border-amber-900/50 hover:border-amber-800 rounded-lg text-xs font-semibold cursor-pointer transition-colors active:scale-[0.99]"
+                      >
+                        ⏳ Abrir Tarde (Cerrar Mañana)
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Timeline Visual Slots Grid */}
+                <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 shadow-xl space-y-4">
+                  <div className="border-b border-neutral-850 pb-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                    <div>
+                      <h4 className="text-sm font-bold font-sans uppercase text-white tracking-wide flex items-center gap-1.5">
+                        📆 Visualizador de Turnos ({manDate})
+                      </h4>
+                      <p className="text-[10px] font-mono text-neutral-500 mt-0.5">Control directo de horas para el personal</p>
+                    </div>
+                    <div className="flex items-center gap-4 text-[10px] font-mono text-neutral-400">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded bg-emerald-500/20 border border-emerald-500/50"></span>
+                        <span>Disponible</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded bg-red-950/20 border border-red-500/30"></span>
+                        <span>Bloqueado</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded bg-amber-500/10 border border-amber-500/40"></span>
+                        <span>Reservado</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Interactive timeline guide */}
+                  <p className="text-xs text-neutral-400 leading-relaxed">
+                    A continuación se listan todos los tramos de la jornada. Pulsa en <strong>🚫 Bloquear</strong> sobre cualquier hora libre para cerrarla, o en <strong>🟢 Activar</strong> para liberar un bloqueo. Las citas de clientes se muestran con sus datos.
                   </p>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-                    {/* Cierres Completos */}
-                    <div className="bg-neutral-900/40 border border-neutral-850 p-3.5 rounded-lg flex flex-col justify-between space-y-3">
-                      <div>
-                        <div className="font-sans font-bold text-xs text-red-400 flex items-center gap-1.5">
-                          🚫 CERRAR DÍA ENTERO
+                  {/* Slots Map Listing */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 pt-2">
+                    {generateTimeSlots().map((slot) => {
+                      const { status, booking } = getSlotStatusAndOccupant(slot, manDate);
+
+                      if (status === 'free') {
+                        return (
+                          <div
+                            key={slot}
+                            className="p-3.5 bg-emerald-950/5 hover:bg-emerald-955/10 border border-emerald-500/15 rounded-xl flex items-center justify-between transition-colors shadow-sm"
+                          >
+                            <div className="flex items-center space-x-3">
+                              <span className="text-emerald-500 font-mono font-bold text-sm bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/10">
+                                {slot}
+                              </span>
+                              <div className="leading-tight">
+                                <span className="text-xs text-emerald-400 font-semibold block">Disponible</span>
+                                <span className="text-[10px] text-neutral-500 font-mono">Libre para reservar</span>
+                              </div>
+                            </div>
+                            
+                            <button
+                              type="button"
+                              onClick={() => blockSingleSlot(slot, manDate)}
+                              className="px-3 py-1.5 bg-neutral-950 hover:bg-neutral-900 border border-neutral-800 hover:border-red-500/30 text-[10px] font-bold font-mono uppercase tracking-wider text-neutral-400 hover:text-red-400 rounded-lg transition-all shadow cursor-pointer active:scale-95"
+                            >
+                              🚫 Bloquear
+                            </button>
+                          </div>
+                        );
+                      }
+
+                      if (status === 'blocked') {
+                        const blockName = booking ? booking.name.replace('🚫', '').trim() : 'Hora no disponible';
+                        return (
+                          <div
+                            key={slot}
+                            className="p-3.5 bg-red-955/10 border border-red-500/20 rounded-xl flex items-center justify-between transition-colors shadow-sm"
+                          >
+                            <div className="flex items-center space-x-3">
+                              <span className="text-red-400 font-mono font-bold text-sm bg-red-500/10 px-2.5 py-1 rounded-lg border border-red-500/20">
+                                {slot}
+                              </span>
+                              <div className="leading-tight max-w-[150px] sm:max-w-[200px]">
+                                <span className="text-xs text-red-400 font-semibold block uppercase tracking-wider">🚫 Bloqueado</span>
+                                <span className="text-[10px] text-neutral-400 truncate block font-mono" title={blockName}>
+                                  {blockName}
+                                </span>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => booking && unblockSingleSlot(booking.id, slot)}
+                              className="px-3 py-1.5 bg-red-900/25 hover:bg-red-900/40 border border-red-500/30 hover:border-red-500/60 text-[10px] font-bold font-mono uppercase tracking-wider text-red-300 rounded-lg transition-all shadow cursor-pointer active:scale-95"
+                            >
+                              🟢 Activar
+                            </button>
+                          </div>
+                        );
+                      }
+
+                      // status === 'booked' (normal client booking)
+                      if (!booking) return null;
+                      const svcText = getServicesNames(booking.services) || 'Servicios Varios';
+                      return (
+                        <div
+                          key={slot}
+                          className="p-3.5 bg-amber-500/5 border border-amber-500/20 rounded-xl space-y-2.5 transition-colors shadow-sm"
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex items-center space-x-3">
+                              <span className="text-amber-500 font-mono font-bold text-sm bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20">
+                                {slot}
+                              </span>
+                              <div className="leading-tight">
+                                <span className="text-xs text-amber-500 font-bold block uppercase tracking-wider">📅 Reservado</span>
+                                <span className="text-xs text-white font-medium block mt-0.5">
+                                  {booking.name}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Price display badge */}
+                            <span className="text-xs font-bold font-serif text-amber-500 bg-amber-500/10 border border-amber-500/10 px-2 py-0.5 rounded">
+                              {booking.totalPrice}€
+                            </span>
+                          </div>
+
+                          <div className="text-[10px] text-neutral-400 bg-neutral-950 p-2 rounded border border-neutral-850 space-y-1.5 font-mono">
+                            <div className="flex justify-between">
+                              <span className="text-neutral-500 uppercase">Móvil:</span>
+                              <span className="text-white font-semibold">{booking.phone}</span>
+                            </div>
+                            <div className="flex justify-between items-start gap-2">
+                              <span className="text-neutral-500 uppercase shrink-0">Servicios:</span>
+                              <span className="text-white text-right truncate max-w-[200px]" title={svcText}>{svcText}</span>
+                            </div>
+                            {booking.notes && (
+                              <div className="border-t border-neutral-900 pt-1 mt-1 text-[9px] text-neutral-500 italic">
+                                Nota: "{booking.notes}"
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex items-center justify-between gap-2.5 pt-1">
+                            <a
+                              href={`https://wa.me/34${booking.phone.replace(/\s+/g, '')}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex-1 text-center py-1.5 bg-emerald-950/40 hover:bg-emerald-900/30 border border-emerald-500/30 text-[9px] font-bold font-mono uppercase tracking-wider text-emerald-400 rounded transition-colors"
+                            >
+                              💬 WhatsApp
+                            </a>
+                            <button
+                              type="button"
+                              onClick={(e) => handleDeleteBooking(booking.id, e)}
+                              className="flex-1 text-center py-1.5 bg-red-950/25 hover:bg-red-950/55 border border-red-500/20 text-[9px] font-bold font-mono uppercase tracking-wider text-red-400 rounded transition-colors cursor-pointer"
+                            >
+                              ❌ Cancelar
+                            </button>
+                          </div>
                         </div>
-                        <p className="text-[10px] text-neutral-500 leading-tight mt-1">
-                          Bloquea todas las horas disponibles de la fecha de corrido.
-                        </p>
-                      </div>
-                      <div className="flex flex-col gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleQuickBlock('today', 'full')}
-                          className="w-full text-center py-2 bg-red-650 hover:bg-red-650/80 font-bold font-mono text-[10px] text-white rounded-lg cursor-pointer transition-all active:scale-[0.98] border border-red-500/10 shadow shadow-red-950/50"
-                        >
-                          Cerrar TODO Hoy 🚫
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleQuickBlock('tomorrow', 'full')}
-                          className="w-full text-center py-2 bg-neutral-950 hover:bg-neutral-900 border border-neutral-800 font-bold font-mono text-[10px] text-neutral-300 hover:text-white rounded-lg cursor-pointer transition-all active:scale-[0.98]"
-                        >
-                          Cerrar TODO Mañana
-                        </button>
-                      </div>
-                    </div>
+                      );
+                    })}
+                  </div>
+                </div>
 
-                    {/* Aperturas Tardías */}
-                    <div className="bg-neutral-900/40 border border-neutral-850 p-3.5 rounded-lg flex flex-col justify-between space-y-3">
-                      <div>
-                        <div className="font-sans font-bold text-xs text-amber-500 flex items-center gap-1.5">
-                          ⏳ RETRASAR APERTURA
+                {/* Optional Custom block duration drawer / form */}
+                <div className="bg-neutral-900/40 border border-neutral-850 p-5 rounded-2xl">
+                  <details className="group">
+                    <summary className="text-xs font-bold font-mono text-neutral-500 uppercase tracking-widest cursor-pointer select-none flex items-center justify-between hover:text-neutral-400">
+                      <span>🔧 Bloqueos especiales / Personalizados de larga duración</span>
+                      <span className="transition-transform group-open:rotate-180">▼</span>
+                    </summary>
+                    <div className="pt-4 space-y-4">
+                      <p className="text-[11px] font-mono text-neutral-400">
+                        Si necesitas crear un bloqueo con una duración muy específica (ej. 2 horas o 4 horas) que empiece en una hora concreta, rellena este formulario alternativo:
+                      </p>
+
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          setAdminError('');
+                          setAdminSuccess('');
+
+                          if (!manDate) {
+                            setAdminError('Por favor introduce una fecha para realizar el bloqueo.');
+                            return;
+                          }
+                          if (!manTime) {
+                            setAdminError('Por favor selecciona la hora de inicio.');
+                            return;
+                          }
+
+                          const newBlock: Booking = {
+                            id: 'block-' + Math.random().toString(36).substring(2, 5),
+                            name: `🚫 Bloqueo: ${manNotes.trim() || 'Hora no disponible'}`,
+                            phone: 'ORGANIZACIÓN',
+                            date: manDate,
+                            time: manTime,
+                            services: [],
+                            notes: 'Bloqueado por el administrador.',
+                            totalPrice: 0,
+                            totalDuration: blockDuration,
+                            createdAt: Date.now()
+                          };
+
+                          createNewBooking(newBlock).then(() => {
+                            onBookingCreated();
+                            setAdminSuccess('¡Horario bloqueado correctamente! Ya no saldrá disponible para los clientes.');
+                            setManNotes('');
+                            setManTime('');
+                          });
+                        }}
+                        className="space-y-4 text-xs"
+                      >
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div>
+                            <label className="text-[10px] text-neutral-500 block mb-1 font-mono uppercase">Día del Bloqueo</label>
+                            <input
+                              type="date"
+                              value={manDate}
+                              onChange={(e) => setManDate(e.target.value)}
+                              className="w-full bg-neutral-950 border border-neutral-850 rounded p-2 text-white font-mono"
+                              required
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-neutral-500 block mb-1 font-mono uppercase">Inicio del Bloqueo</label>
+                            <select
+                              value={manTime}
+                              onChange={(e) => setManTime(e.target.value)}
+                              className="w-full bg-neutral-950 border border-neutral-850 rounded p-2 text-white font-mono"
+                              required
+                            >
+                              <option value="">-- Elige Hora --</option>
+                              {generateTimeSlots().map((s) => (
+                                <option key={s} value={s}>{s}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-neutral-500 block mb-1 font-mono uppercase">Duración</label>
+                            <select
+                              value={blockDuration}
+                              onChange={(e) => setBlockDuration(Number(e.target.value))}
+                              className="w-full bg-neutral-950 border border-neutral-850 rounded p-2 text-white font-mono"
+                              required
+                            >
+                              <option value={15}>15 Minutos (ej. Recado rápido)</option>
+                              <option value={30}>30 Minutos (ej. Corte simple bloqueado)</option>
+                              <option value={45}>45 Minutos (ej. Descanso de café)</option>
+                              <option value={60}>60 Minutos (1 Hora)</option>
+                              <option value={120}>120 Minutos (2 Horas)</option>
+                              <option value={300}>300 Minutos (Medio día)</option>
+                              <option value={720}>720 Minutos (12 Horas - Todo el Día)</option>
+                            </select>
+                          </div>
                         </div>
-                        <p className="text-[10px] text-neutral-500 leading-tight mt-1">
-                          Cierra el turno de mañana (9:00 a 14:00). Abre por la tarde (16:00 h).
-                        </p>
-                      </div>
-                      <div className="flex flex-col gap-2">
+
+                        <div>
+                          <label className="text-[10px] text-neutral-500 block mb-1 font-mono uppercase">Motivo o Notas</label>
+                          <input
+                            type="text"
+                            value={manNotes}
+                            onChange={(e) => setManNotes(e.target.value)}
+                            placeholder="Ej. Almuerzo, Descanso, Cita personal..."
+                            className="w-full bg-neutral-950 border border-neutral-850 rounded p-2 text-white font-mono"
+                          />
+                        </div>
+
                         <button
-                          type="button"
-                          onClick={() => handleQuickBlock('today', 'morning_only')}
-                          className="w-full text-center py-2 bg-amber-600 hover:bg-amber-500/80 font-bold font-mono text-[10px] text-white rounded-lg cursor-pointer transition-all active:scale-[0.98] border border-amber-500/10 shadow shadow-amber-950/50"
+                          type="submit"
+                          className="w-full py-2.5 bg-neutral-900 hover:bg-neutral-850 border border-neutral-800 text-white font-bold rounded hover:text-amber-500 uppercase font-mono tracking-widest text-[10px] transition-colors"
                         >
-                          Abrir de Tarde Hoy ⏳
+                          Crear Bloqueo de Larga Duración
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => handleQuickBlock('tomorrow', 'morning_only')}
-                          className="w-full text-center py-2 bg-neutral-950 hover:bg-neutral-900 border border-neutral-800 font-bold font-mono text-[10px] text-neutral-300 hover:text-white rounded-lg cursor-pointer transition-all active:scale-[0.98]"
-                        >
-                          Abrir de Tarde Mañana
-                        </button>
-                      </div>
+                      </form>
                     </div>
-                  </div>
-
-                  {manDate && (
-                    <div className="flex flex-col sm:flex-row items-center sm:items-center justify-between gap-2.5 text-[11px] bg-neutral-950 text-neutral-400 p-3 rounded-lg border border-neutral-850">
-                      <span>Día seleccionado abajo: <strong className="text-amber-500 font-mono">{manDate}</strong></span>
-                      <div className="flex flex-wrap gap-2 w-full sm:w-auto justify-end">
-                        <button
-                          type="button"
-                          onClick={() => handleQuickBlock('manual', 'full')}
-                          className="px-2.5 py-1.5 bg-red-650/20 hover:bg-red-650/30 border border-red-500/20 rounded font-mono text-[10px] font-bold text-white cursor-pointer transition-colors"
-                        >
-                          🚫 Cerrar este día completo
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleQuickBlock('manual', 'morning_only')}
-                          className="px-2.5 py-1.5 bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/20 rounded font-mono text-[10px] font-bold text-white cursor-pointer transition-colors"
-                        >
-                          ⏳ Abrir tarde este día
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                  </details>
                 </div>
-
-                <div className="relative flex py-2 items-center">
-                  <div className="flex-grow border-t border-neutral-850"></div>
-                  <span className="flex-shrink mx-4 text-[9px] uppercase font-mono tracking-widest text-neutral-600">O BLOQUEO MANUAL DE HORAS</span>
-                  <div className="flex-grow border-t border-neutral-850"></div>
-                </div>
-
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    setAdminError('');
-                    setAdminSuccess('');
-
-                    if (!manDate) {
-                      setAdminError('Por favor introduce una fecha para realizar el bloqueo.');
-                      return;
-                    }
-                    if (!manTime) {
-                      setAdminError('Por favor selecciona la hora de inicio.');
-                      return;
-                    }
-
-                    const newBlock: Booking = {
-                      id: 'block-' + Math.random().toString(36).substring(2, 5),
-                      name: `🚫 Bloqueo: ${manNotes.trim() || 'Hora no disponible'}`,
-                      phone: 'ORGANIZACIÓN',
-                      date: manDate,
-                      time: manTime,
-                      services: [],
-                      notes: 'Bloqueado por el administrador.',
-                      totalPrice: 0,
-                      totalDuration: blockDuration,
-                      createdAt: Date.now()
-                    };
-
-                    createNewBooking(newBlock).then(() => {
-                      onBookingCreated();
-                      setAdminSuccess('¡Horario bloqueado correctamente! Ya no saldrá disponible para los clientes.');
-                      setManNotes('');
-                      setManTime('');
-                    });
-                  }}
-                  className="space-y-6"
-                >
-                  <div className="bg-neutral-900/50 p-4 rounded-xl border border-neutral-850/60 font-mono">
-                    <p className="text-[11px] text-neutral-400 leading-relaxed">
-                      🛡️ <strong>Uso del Bloqueador Personalizado:</strong> Ideal si te vas a ausentar un tramo corto (almuerzo, recado o descanso de café). Selecciona la fecha, la hora exacta de inicio y el tiempo.
-                    </p>
-                  </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs text-neutral-400 block mb-1.5 font-bold uppercase tracking-wider font-mono">Día del Bloqueo *</label>
-                    <input
-                      type="date"
-                      value={manDate}
-                      onChange={(e) => setManDate(e.target.value)}
-                      className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-3 text-white font-mono text-sm focus:outline-none focus:border-amber-500"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-neutral-400 block mb-1.5 font-bold uppercase tracking-wider font-mono">Inicio del Bloqueo *</label>
-                    <select
-                      value={manTime}
-                      onChange={(e) => setManTime(e.target.value)}
-                      className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-3 text-white font-mono text-sm focus:outline-none focus:border-amber-500"
-                      required
-                    >
-                      <option value="">-- Elige Hora --</option>
-                      {generateTimeSlots().map((s) => (
-                        <option key={s} value={s}>{s}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs text-neutral-400 block mb-1.5 font-bold uppercase tracking-wider font-mono">Duración del bloqueo *</label>
-                    <select
-                      value={blockDuration}
-                      onChange={(e) => setBlockDuration(Number(e.target.value))}
-                      className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-3 text-white font-mono text-sm focus:outline-none focus:border-amber-500"
-                      required
-                    >
-                      <option value={15}>15 Minutos (ej. Recado rápido)</option>
-                      <option value={30}>30 Minutos (ej. Corte simple bloqueado)</option>
-                      <option value={45}>45 Minutos (ej. Descanso de café)</option>
-                      <option value={60}>60 Minutos (1 Hora)</option>
-                      <option value={120}>120 Minutos (2 Horas)</option>
-                      <option value={300}>300 Medios días</option>
-                      <option value={720}>720 Minutos (12 Horas - Todo el Día)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-xs text-neutral-400 block mb-1.5 font-bold uppercase tracking-wider font-mono">Motivo del Bloqueo (opcional)</label>
-                    <input
-                      type="text"
-                      value={manNotes}
-                      onChange={(e) => setManNotes(e.target.value)}
-                      placeholder="Ej. Almuerzo, Trámite personal, Descanso..."
-                      className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-3 text-white text-sm focus:outline-none focus:border-amber-500"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full py-3.5 bg-red-650 hover:bg-red-500 active:scale-[0.99] text-white text-xs uppercase tracking-widest font-bold rounded-lg cursor-pointer transition-colors shadow-lg shadow-red-500/10"
-                >
-                  Confirmar Bloqueo de Horario
-                </button>
-              </form>
-            </div>
-          )}
+              </div>
+            )}
 
             {adminActiveTab === 'manual' && (
               <form
@@ -1224,7 +1458,7 @@ export default function BookingForm({ selectedServiceIds, onToggleService, onBoo
                   const [h, m] = manTime.split(':').map(Number);
                   const startMinutes = h * 60 + m;
                   const isOverlapping = allBookings.some((b) => {
-                    if (b.date !== manDate) return false;
+                    if (!b || !b.date || !b.time || b.date !== manDate) return false;
                     const [bH, bM] = b.time.split(':').map(Number);
                     const bStart = bH * 60 + bM;
                     const bDur = getBookingDuration(b);
@@ -1358,7 +1592,7 @@ export default function BookingForm({ selectedServiceIds, onToggleService, onBoo
                     <div>
                       <span className="text-[10px] text-neutral-400 font-mono uppercase block">Suma de Caja</span>
                       <span className="text-2xl font-serif font-bold text-amber-500 mt-1 block">
-                        {allBookings.reduce((sum, b) => sum + (Number(b.totalPrice) || 0), 0)}€
+                        {allBookings.filter(Boolean).reduce((sum, b) => sum + (Number(b.totalPrice) || 0), 0)}€
                       </span>
                       <span className="text-[9px] text-neutral-500 mt-1 block">Todos los servicios activos</span>
                     </div>
@@ -1368,7 +1602,7 @@ export default function BookingForm({ selectedServiceIds, onToggleService, onBoo
                     <div>
                       <span className="text-[10px] text-neutral-400 font-mono uppercase block">Total Agendados</span>
                       <span className="text-2xl font-serif font-bold text-white mt-1 block">
-                        {allBookings.filter(b => !b.name.startsWith('🚫')).length}
+                        {allBookings.filter(b => b && b.name && !b.name.startsWith('🚫')).length}
                       </span>
                       <span className="text-[9px] text-neutral-500 mt-1 block">Excluyendo bloqueos de horas</span>
                     </div>
@@ -1391,15 +1625,15 @@ export default function BookingForm({ selectedServiceIds, onToggleService, onBoo
                     <div className="flex justify-between text-neutral-400">
                       <span>Ingresos medios por cita:</span>
                       <span className="text-white">
-                        {allBookings.filter(b => (Number(b.totalPrice) || 0) > 0).length > 0
-                          ? (allBookings.reduce((sum, b) => sum + (Number(b.totalPrice) || 0), 0) / allBookings.filter(b => (Number(b.totalPrice) || 0) > 0).length).toFixed(2)
+                        {allBookings.filter(b => b && (Number(b.totalPrice) || 0) > 0).length > 0
+                          ? (allBookings.filter(b => b).reduce((sum, b) => sum + (Number(b.totalPrice) || 0), 0) / allBookings.filter(b => b && (Number(b.totalPrice) || 0) > 0).length).toFixed(2)
                           : '0.00'}€
                       </span>
                     </div>
                     <div className="flex justify-between text-neutral-400">
                       <span>Tiempo total ocupado en sillón:</span>
                       <span className="text-white">
-                        {allBookings.reduce((sum, b) => sum + getBookingDuration(b), 0)} min (~{Math.round(allBookings.reduce((sum, b) => sum + getBookingDuration(b), 0) / 60)} horas)
+                        {allBookings.filter(Boolean).reduce((sum, b) => sum + getBookingDuration(b), 0)} min (~{Math.round(allBookings.filter(Boolean).reduce((sum, b) => sum + getBookingDuration(b), 0) / 60)} horas)
                       </span>
                     </div>
                   </div>
